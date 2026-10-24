@@ -10,5 +10,5 @@ in, set the status, link it from the issue that needed it. Statuses:
 
 | ADR | Title | Status | Needed by |
 |---|---|---|---|
-| [0001](0001-repository-layout.md) | Repository layout: own public repository `catalog-import-watchtower` | accepted, migration pending | before the backlog |
+| [0001](0001-repository-layout.md) | Repository layout: own public repository `catalog-import-watchtower` | accepted | done |
 | [0002](0002-deployment-provider.md) | Deployment: Fly.io apps, Neon PostgreSQL, public image in GHCR, secrets inventory | accepted | issue 10 (exporter flag in 09) |

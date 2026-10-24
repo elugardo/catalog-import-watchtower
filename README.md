@@ -7,7 +7,7 @@ import raises a user-impact alert, and an LLM-powered on-call agent with a
 six-tool allowlist retries transient failures once, escalates everything
 else, and records what it did.
 
-Final project for the AI Dev Tools Zoomcamp 2026.
+Final project for the AI Dev Tools Zoomcamp 2026 (the course work lives in [`elugardo/ai-dev-tools-zoomcamp`](https://github.com/elugardo/ai-dev-tools-zoomcamp)).
 
 **Status: set-up phase.** The agent team and the process are in place and
 the specification is being finalized; the backlog is published and

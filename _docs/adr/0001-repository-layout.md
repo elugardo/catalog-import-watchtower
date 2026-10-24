@@ -1,6 +1,6 @@
 # 0001. Repository layout: own public repository
 
-- **Status:** accepted (migration pending Marcos's go-ahead)
+- **Status:** accepted (migrated 2026-10-24)
 - **Date:** 2026-10-24
 - **Issue:** CIW-01
 

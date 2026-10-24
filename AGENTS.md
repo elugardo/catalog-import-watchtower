@@ -9,12 +9,11 @@ tool allowlist, retries a transient failure once, escalates everything else,
 and leaves an audit trail in the database. It is the final project for the AI
 Dev Tools Zoomcamp 2026.
 
-**This folder is the whole project.** It is moving to its own public
-repository, `elugardo/catalog-import-watchtower` (ADR-0001); until then it
-lives as `finalproject/` in the course repo and must not import, read, or
-depend on any sibling folder. Open your coding session at this folder's root
-so that `.claude/`, `.agents/` and this file are the ones picked up. Every
-path in these docs is relative to this folder.
+**This repository is the whole project** (ADR-0001; it began as
+`finalproject/` in the course repo `elugardo/ai-dev-tools-zoomcamp`). Open
+your coding session at the repository root so that `.claude/`, `.agents/`
+and this file are picked up. Every path in these docs is relative to the
+repository root.
 
 ## Read this first
 

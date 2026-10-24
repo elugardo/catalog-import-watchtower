@@ -77,7 +77,7 @@ Option 1.
 
 | Secret | Lives in | Never in |
 |---|---|---|
-| `FLY_API_TOKEN`, a deploy token scoped to the two apps (`flyctl tokens create deploy -a ciw-dev`, same for prod) | GitHub Actions secrets of the `development` and `production` environments | repo, logs, PR builds from forks (GitHub withholds secrets from fork PRs) |
+| `FLY_API_TOKEN`, one deploy token **per app** (`flyctl tokens create deploy -a ciw-dev`; a separate one for `ciw-prod`) | GitHub Actions secrets of the `development` and `production` environments respectively, each holding only its own app's token | repo, logs, PR builds from forks (GitHub withholds secrets from fork PRs) |
 | `DATABASE_URL` per environment | Fly secrets of that app; locally the Compose default in `.env` | repo, image, telemetry |
 | LLM provider key | local `.env` only (plus a spending cap on the provider side; revoked after the course) | repo, GitHub, Fly by default, CI (CI uses a fake LLM) |
 

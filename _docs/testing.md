@@ -34,7 +34,7 @@ engineer chooses, documents, and makes CI call exactly that.
 | 2 upsert | integration: `update.csv` after `valid.csv` → same product count, new price/quantity on `CHAIR-001` |
 | 3 atomic validation | integration: `invalid.csv` → `FAILED`, error names row and column, products unchanged (compare full snapshot, not just count) |
 | 4 recovery | integration with fake LLM: injected failure → alert → worker → `COMPLETED`, 2 attempts, alert `RESOLVED`, timeline rows, products written exactly once |
-| 5 guardrails | unit + integration: validation error → no retry; two concurrent retry calls → one attempt; third attempt refused with 409; `resolve_alert` on a failed import refused |
+| 5 guardrails | unit + integration: validation error → no retry; two concurrent retry calls → one attempt; third attempt refused as a no-op that returns the current state (no exception, no new attempt row); `resolve_alert` on a failed import refused |
 | 6 reproducibility | CI job: `docker compose up --build -d --wait` then `GET /api/health` is 200; the one test command passes |
 
 Also always cover: the empty file, header-only file, missing, duplicate and

@@ -88,7 +88,8 @@ any other source.
 ## 8. Report (human triage and demos)
 
 For a hand-run incident or the documented real-LLM demonstration, capture
-under `_docs/evidence/<date>-<import_id>/`:
+under `_docs/evidence/<date>-real-llm-recovery/` (a hand-run triage uses
+`<date>-manual-triage/`; the `report.md` names the import id):
 
 - the import detail page showing two attempts and the agent timeline
 - the `agent_actions` rows (JSON export or screenshot)

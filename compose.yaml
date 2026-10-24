@@ -1,0 +1,90 @@
+# Catalog Import Watchtower, local stack: `docker compose up --build`.
+# Every ${VAR} has a default, so a missing .env is not an error. Secrets (the
+# LLM key, CIW-08.2) come only from .env; nothing sensitive is written here
+# except the local Postgres URL below.
+
+name: ciw
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    image: ciw:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://ciw:ciw@db:5432/ciw
+      AGENT_ENABLED: ${AGENT_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-lgtm:4318}
+      OTEL_SERVICE_NAME: ciw-app
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Healthy only once the API answers *and* reports the database reachable,
+      # so `docker compose up --wait` returns when /api/health says db: ok.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json, sys, urllib.request; body = json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)); sys.exit(0 if body['db'] == 'ok' else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  oncall-agent:
+    image: ciw:local
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    command: ["python", "-m", "app.oncall"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://ciw:ciw@db:5432/ciw
+      AGENT_ENABLED: ${AGENT_ENABLED:-false}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      AGENT_POLL_SECONDS: ${AGENT_POLL_SECONDS:-10}
+      AGENT_CLAIM_TIMEOUT_SECONDS: ${AGENT_CLAIM_TIMEOUT_SECONDS:-300}
+      AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-8}
+      AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-120}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-lgtm:4318}
+      OTEL_SERVICE_NAME: ciw-oncall-agent
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ciw
+      POSTGRES_PASSWORD: ciw
+      POSTGRES_DB: ciw
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ciw -d ciw"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  otel-lgtm:
+    # OpenTelemetry Collector + Prometheus + Loki + Tempo + Grafana in one
+    # container. Provisioning, dashboards and the alert rule arrive with CIW-09.2.
+    image: grafana/otel-lgtm:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

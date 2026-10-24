@@ -1,0 +1,88 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --fg: #1c1f24;
+  --muted: #5c6470;
+  --card: #ffffff;
+  --border: #d9dee5;
+  --ok: #1a7f4b;
+  --bad: #b3261e;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c;
+    --fg: #e8eaee;
+    --muted: #9aa3ad;
+    --card: #1d2229;
+    --border: #2e353e;
+    --ok: #4fc08d;
+    --bad: #f2777a;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.shell {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.shell__header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+}
+
+.shell__tagline,
+.shell__note {
+  color: var(--muted);
+  margin: 0.25rem 0 1.5rem;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+}
+
+.card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.health {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.4rem 1.5rem;
+}
+
+.health__row {
+  display: contents;
+}
+
+.health dt {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.health dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.health dd[data-value="ok"] {
+  color: var(--ok);
+}
+
+.health dd[data-value="error"],
+.health dd[data-value="degraded"] {
+  color: var(--bad);
+}

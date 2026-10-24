@@ -1,0 +1,85 @@
+# PR checks (CIW-01). CIW-06 makes the test jobs call the single test command
+# and adds the compose-up smoke job; CIW-10.1 adds gitleaks, the GHCR publish
+# and the dev deploy. Nothing here needs a secret.
+
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend unit + integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ciw
+          POSTGRES_PASSWORD: ciw
+          POSTGRES_DB: ciw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ciw -d ciw"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgresql+psycopg://ciw:ciw@localhost:5432/ciw
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.6.14"
+          enable-cache: true
+      - name: Install Python and dependencies
+        run: uv sync --frozen
+      - name: Unit tests (no database)
+        run: uv run pytest tests/unit -v
+      - name: Integration tests (PostgreSQL 16 service)
+        run: uv run pytest tests/integration -v
+      - name: Alembic upgrade is a clean no-op on an empty database
+        run: uv run alembic upgrade head
+
+  frontend:
+    name: Frontend test + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+
+  image:
+    name: Image build (docker compose build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the app image with the commit SHA as version
+        run: docker compose build app
+        env:
+          APP_VERSION: sha-${{ github.sha }}
+      - name: Image reports the build-argument version and contains no .env
+        run: |
+          echo "placeholder=1" > .env
+          docker compose run --rm --no-deps app ls -a /app | tee listing.txt
+          if grep -q '^\.env' listing.txt; then echo "::error::.env leaked into the image"; exit 1; fi
+          docker compose run --rm --no-deps app python -c "from app.settings import get_settings; v = get_settings().app_version; print(v); assert v == 'sha-${{ github.sha }}', v"

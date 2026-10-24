@@ -13,7 +13,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# ConfigParser interpolates `%`, so a URL-encoded password (`p%40ss`) must be
+# escaped or `alembic upgrade head` dies with InterpolationSyntaxError at start-up.
+config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
 # Model modules must be imported before autogenerate can see them (CIW-02 on).
 target_metadata = Base.metadata

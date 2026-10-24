@@ -1,5 +1,6 @@
 """SQLAlchemy engine, session factory and declarative base."""
 
+import logging
 import threading
 from functools import lru_cache
 
@@ -7,6 +8,8 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.settings import get_settings
+
+log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -32,7 +35,9 @@ def _probe_database() -> bool:
         with get_engine().connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
-    except Exception:  # noqa: BLE001 - any failure means "error" on the health endpoint
+    except Exception as exc:  # noqa: BLE001 - any failure means "error" on the health endpoint
+        # Type only: the driver's message can carry the host and user from the DSN.
+        log.warning("database health probe failed: %s", type(exc).__name__)
         return False
 
 

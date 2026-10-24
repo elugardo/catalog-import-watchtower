@@ -2,10 +2,32 @@
 
 import time
 
+from fastapi.testclient import TestClient
+
 # Nothing listens on port 1; connecting is refused immediately on every platform.
 UNREACHABLE_DB = "postgresql+psycopg://nobody:nothing@127.0.0.1:1/nothing"
 
 HEALTH_KEYS = {"status", "db", "agent_enabled", "version"}
+ERROR_KEYS = {"code", "message", "details"}
+
+
+def test_unexpected_exception_is_a_500_in_the_error_shape(make_client, monkeypatch):
+    import app.routers.health as health_module
+
+    def exploding_probe() -> bool:
+        raise RuntimeError("probe exploded")
+
+    monkeypatch.setattr(health_module, "check_database", exploding_probe)
+    # Let the response through instead of re-raising the exception in the test.
+    client = TestClient(make_client(DATABASE_URL=UNREACHABLE_DB).app, raise_server_exceptions=False)
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 500
+    body = response.json()
+    assert set(body) == ERROR_KEYS
+    assert body["code"] == "INTERNAL_ERROR"
+    assert "probe exploded" not in body["message"]
 
 
 def test_health_is_200_with_exactly_four_keys_when_db_unreachable(make_client):

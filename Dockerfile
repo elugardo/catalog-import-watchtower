@@ -36,8 +36,10 @@ COPY alembic/ ./alembic/
 COPY app/ ./app/
 COPY --from=web /web/dist/ ./app/static/
 
-RUN useradd --uid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin ciw \
-    && chown -R ciw:ciw /app
+# /app stays root-owned and world-readable: the runtime user only reads it
+# (no bytecode, no uploads on disk), and a `chown -R` here would copy the whole
+# .venv into one more layer.
+RUN useradd --uid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin ciw
 USER ciw
 
 EXPOSE 8000

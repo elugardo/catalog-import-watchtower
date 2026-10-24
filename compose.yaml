@@ -5,19 +5,27 @@
 
 name: ciw
 
+# Shared by the two processes of the one image (see Dockerfile).
+x-build: &build
+  context: .
+  args:
+    APP_VERSION: ${APP_VERSION:-dev}
+
+# Variables `app.settings` reads in both processes; each service adds its own.
+x-shared-env: &shared-env
+  DATABASE_URL: postgresql+psycopg://ciw:ciw@db:5432/ciw
+  DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-2}
+  AGENT_ENABLED: ${AGENT_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-lgtm:4318}
+  OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
+
 services:
   app:
-    build:
-      context: .
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
+    build: *build
     image: ciw:local
     environment:
-      DATABASE_URL: postgresql+psycopg://ciw:ciw@db:5432/ciw
-      AGENT_ENABLED: ${AGENT_ENABLED:-false}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-lgtm:4318}
+      <<: *shared-env
       OTEL_SERVICE_NAME: ciw-app
-      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
     ports:
       - "${APP_PORT:-8000}:8000"
     depends_on:
@@ -38,23 +46,17 @@ services:
 
   oncall-agent:
     image: ciw:local
-    build:
-      context: .
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
+    build: *build
     command: ["python", "-m", "app.oncall"]
     environment:
-      DATABASE_URL: postgresql+psycopg://ciw:ciw@db:5432/ciw
-      AGENT_ENABLED: ${AGENT_ENABLED:-false}
+      <<: *shared-env
+      OTEL_SERVICE_NAME: ciw-oncall-agent
       LLM_PROVIDER: ${LLM_PROVIDER:-}
       LLM_MODEL: ${LLM_MODEL:-}
       AGENT_POLL_SECONDS: ${AGENT_POLL_SECONDS:-10}
       AGENT_CLAIM_TIMEOUT_SECONDS: ${AGENT_CLAIM_TIMEOUT_SECONDS:-300}
       AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-8}
       AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-120}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-lgtm:4318}
-      OTEL_SERVICE_NAME: ciw-oncall-agent
-      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -66,7 +68,8 @@ services:
       POSTGRES_PASSWORD: ciw
       POSTGRES_DB: ciw
     ports:
-      - "5432:5432"
+      # Host port only; the containers always reach the database on db:5432.
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

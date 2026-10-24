@@ -19,6 +19,7 @@ with safe placeholders. The app runs with none of the optional ones set.
 | `AGENT_POLL_SECONDS`, `AGENT_CLAIM_TIMEOUT_SECONDS`, `AGENT_MAX_TOOL_CALLS`, `AGENT_TIMEOUT_SECONDS` | oncall-agent | no | 10 / 300 / 8 / 120 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_SDK_DISABLED` | app, oncall-agent | no | telemetry; disabled in tests and (by default) when deployed |
 | `APP_PORT` | compose | no | host port for the app (default 8000) |
+| `DB_PORT` | compose | no | host port for the database (default 5432); the containers always use `db:5432` |
 | `APP_VERSION` | image **build argument** (`ARG APP_VERSION=dev` in the Dockerfile, passed by `compose.yaml` → `build.args`); also read as an env var by `app.settings` | no (default `dev`) | becomes `version` on `/api/health`; `APP_VERSION=abc123 docker compose build` bakes `abc123` into the image; CI sets it to the commit SHA (issue 10) |
 | `STATIC_DIR` | app | no (default `app/static`) | folder of the built SPA that `/` serves; only needed when running uvicorn on the host against a bundle elsewhere |
 
@@ -28,6 +29,7 @@ with safe placeholders. The app runs with none of the optional ones set.
 docker compose up --build             # app :8000 (SPA + API), db :5432, Grafana :3000, idle worker
 docker compose up --build -d --wait   # detached; returns once app is healthy, i.e. /api/health says db: ok
 APP_PORT=8081 docker compose up       # app on host port 8081 instead of 8000
+DB_PORT=5433 docker compose up        # db on host port 5433 when a local PostgreSQL owns 5432
 docker compose down                   # stop; the database volume survives
 docker compose down -v                # stop and drop the data volume
 ```
@@ -43,7 +45,7 @@ within the connect timeout; it recovers by itself when `db` is back.
 | Service | URL | Notes |
 |---|---|---|
 | app | http://localhost:8000 and http://localhost:8000/api/health | SPA and API, same origin; any non-`/api` path serves the SPA (history fallback); unknown `/api/...` is a 404 in the error shape |
-| db | `localhost:5432`, user / password / database `ciw` / `ciw` / `ciw` | PostgreSQL 16; named volume `pgdata` |
+| db | `localhost:5432` (`DB_PORT`), user / password / database `ciw` / `ciw` / `ciw` | PostgreSQL 16; named volume `pgdata` |
 | Grafana | http://localhost:3000 (health: `/api/health`) | `grafana/otel-lgtm`; anonymous admin, no login form; dashboard and alert rule arrive with issue 09 |
 | oncall-agent | `docker compose logs -f oncall-agent` | no port; logs one line and stays idle unless `AGENT_ENABLED=true` (then it logs that the loop is not implemented yet, issue 08) |
 

@@ -11,6 +11,7 @@ from app.routers import health
 from app.settings import get_settings
 
 API_PREFIX = "/api"
+_API_SEGMENT = API_PREFIX.lstrip("/")
 
 # HTTP status -> error `code` for errors that are not raised by our own code
 # with an explicit code (see `_docs/api.md` -> *Codes*).
@@ -60,12 +61,18 @@ def create_app() -> FastAPI:
     ) -> Response:
         return error_response(422, "INVALID_FIELD", "request validation failed", list(exc.errors()))
 
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
+        # Without this, Starlette answers a crash with `text/plain "Internal Server
+        # Error"`, outside the one error shape. The exception is still re-raised to
+        # the server log by Starlette after this response is sent; the message here
+        # stays generic so nothing internal leaks to the client.
+        return error_response(500, "INTERNAL_ERROR", "internal error")
+
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> Response:
         """History fallback: files from the bundle when they exist, `index.html` otherwise."""
-        if full_path == API_PREFIX.lstrip("/") or full_path.startswith(
-            API_PREFIX.lstrip("/") + "/"
-        ):
+        if full_path == _API_SEGMENT or full_path.startswith(_API_SEGMENT + "/"):
             return error_response(404, "NOT_FOUND", f"no API route at /{full_path}")
 
         static_dir: Path = get_settings().static_dir

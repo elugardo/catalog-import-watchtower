@@ -10,13 +10,10 @@ import app.oncall.__main__ as worker
 
 
 @pytest.fixture
-def stub_env(monkeypatch):
+def stub_env(monkeypatch, reset_caches):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://nobody:nothing@127.0.0.1:1/nothing")
-    from app.settings import get_settings
-
-    get_settings.cache_clear()
-    yield monkeypatch
-    get_settings.cache_clear()
+    reset_caches()
+    return monkeypatch
 
 
 def _run_until_stopped(monkeypatch) -> int:

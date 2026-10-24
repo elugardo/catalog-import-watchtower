@@ -1,5 +1,6 @@
 """SQLAlchemy engine, session factory and declarative base."""
 
+import threading
 from functools import lru_cache
 
 from sqlalchemy import Engine, create_engine, text
@@ -26,11 +27,32 @@ def get_sessionmaker() -> sessionmaker[Session]:
     return sessionmaker(bind=get_engine(), expire_on_commit=False)
 
 
-def check_database() -> bool:
-    """Return True when `SELECT 1` succeeds; never raises, never hangs past the connect timeout."""
+def _probe_database() -> bool:
     try:
         with get_engine().connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
     except Exception:  # noqa: BLE001 - any failure means "error" on the health endpoint
         return False
+
+
+def health_deadline_seconds() -> float:
+    """How long `/api/health` waits for the database before reporting `error`."""
+    return get_settings().database_connect_timeout_seconds + 1.0
+
+
+def check_database() -> bool:
+    """Return True when `SELECT 1` succeeds within the health deadline; never raises.
+
+    The connect timeout bounds the TCP handshake but not name resolution: when
+    the `db` container is stopped, resolving its name can take several seconds
+    on some resolvers. The probe therefore runs in a daemon thread and the
+    caller gives up at the deadline; the thread ends on its own shortly after.
+    """
+    outcome: list[bool] = []
+    probe = threading.Thread(
+        target=lambda: outcome.append(_probe_database()), name="db-health-probe", daemon=True
+    )
+    probe.start()
+    probe.join(timeout=health_deadline_seconds())
+    return bool(outcome) and outcome[0]

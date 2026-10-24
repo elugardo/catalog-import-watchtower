@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # One image, two processes: `app` (API + built SPA) and `oncall-agent`
 # (`python -m app.oncall`). Stage 1 builds the React bundle; stage 2 is the
 # Python runtime that serves it.
@@ -20,6 +19,8 @@ ENV APP_VERSION=${APP_VERSION} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON=/usr/local/bin/python3.12 \
     PATH="/app/.venv/bin:${PATH}"
 
 COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /uvx /bin/
@@ -35,7 +36,8 @@ COPY alembic/ ./alembic/
 COPY app/ ./app/
 COPY --from=web /web/dist/ ./app/static/
 
-RUN useradd --system --uid 10001 --home /app ciw && chown -R ciw:ciw /app
+RUN useradd --uid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin ciw \
+    && chown -R ciw:ciw /app
 USER ciw
 
 EXPOSE 8000

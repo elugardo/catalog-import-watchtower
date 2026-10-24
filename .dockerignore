@@ -1,0 +1,24 @@
+# Secrets and local config never enter the image.
+.env
+.env.*
+
+# Local toolchains and build output (the image installs its own).
+.venv/
+**/node_modules/
+web/dist/
+app/static/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Repository metadata and docs.
+.git/
+.github/
+.claude/
+.agents/
+_docs/
+*.md
+tests/
+data/
+*.log

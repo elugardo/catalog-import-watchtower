@@ -1,0 +1,102 @@
+# Catalog Import Watchtower, local stack: `docker compose up --build`.
+# Every ${VAR} has a default, so a missing .env is not an error. Secrets (the
+# LLM key, CIW-08.2) come only from .env; nothing sensitive is written here
+# except the local Postgres URL below.
+
+name: ciw
+
+# Shared by the two processes of the one image (see Dockerfile).
+x-build: &build
+  context: .
+  args:
+    APP_VERSION: ${APP_VERSION:-dev}
+
+# Variables `app.settings` reads in both processes; each service adds its own.
+x-shared-env: &shared-env
+  DATABASE_URL: postgresql+psycopg://ciw:ciw@db:5432/ciw
+  DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-2}
+  AGENT_ENABLED: ${AGENT_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-lgtm:4318}
+  OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
+
+services:
+  app:
+    build: *build
+    image: ciw:local
+    environment:
+      <<: *shared-env
+      OTEL_SERVICE_NAME: ciw-app
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Healthy only once the API answers *and* reports the database reachable,
+      # so `docker compose up --wait` returns when /api/health says db: ok.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json, sys, urllib.request; body = json.load(urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)); sys.exit(0 if body['db'] == 'ok' else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  oncall-agent:
+    image: ciw:local
+    build: *build
+    command: ["python", "-m", "app.oncall"]
+    environment:
+      <<: *shared-env
+      OTEL_SERVICE_NAME: ciw-oncall-agent
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      AGENT_POLL_SECONDS: ${AGENT_POLL_SECONDS:-10}
+      AGENT_CLAIM_TIMEOUT_SECONDS: ${AGENT_CLAIM_TIMEOUT_SECONDS:-300}
+      AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-8}
+      AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-120}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ciw
+      POSTGRES_PASSWORD: ciw
+      POSTGRES_DB: ciw
+    ports:
+      # Host port only; the containers always reach the database on db:5432.
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ciw -d ciw"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  otel-lgtm:
+    # OpenTelemetry Collector + Prometheus + Loki + Tempo + Grafana in one
+    # container. Provisioning, dashboards and the alert rule arrive with CIW-09.2.
+    image: grafana/otel-lgtm:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      # The image's own check, with a start period: on a slow cold start the
+      # bundled services need more than its 3 x 30 s before they all answer,
+      # and without the grace `docker compose up --wait` would give up early.
+      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+
+volumes:
+  pgdata:

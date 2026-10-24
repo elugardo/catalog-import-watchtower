@@ -15,6 +15,9 @@ node_modules/
 web/dist/
 web/coverage/
 
+# built SPA (produced by the Dockerfile / `npm run build`)
+app/static/
+
 # local data and tooling
 data/
 *.log

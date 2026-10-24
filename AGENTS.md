@@ -40,16 +40,16 @@ lands; whoever creates one updates this section in the same PR.
 ```
 <repo root>/
 ├── AGENTS.md, CLAUDE.md, README.md
-├── .github/workflows/     ci.yml, deploy-dev.yml, promote-prod.yml        (issue 10)
+├── .github/workflows/     ci.yml (PR checks); deploy-dev.yml, promote-prod.yml (issue 10)
 ├── openapi.yaml           API contract, written before the code       (issue 02)
-├── compose.yaml           app, oncall-agent, db, otel-lgtm; one command (issue 01)
-├── Dockerfile             multi-stage: builds web/, then the Python image serving SPA + API (issue 01)
-├── .env.example           every variable, no secrets                   (issue 01)
-├── pyproject.toml, uv.lock                                             (issue 01)
-├── app/                   FastAPI + SQLAlchemy + Alembic package; app/oncall/ is the worker (issue 01, 08)
-├── alembic/               migrations                                   (issue 02)
-├── tests/                 unit/, integration/ (real Postgres), oncall/ (issue 01 on)
-├── web/                   React + TypeScript + Vite; Vitest; built into app/static (issue 01)
+├── compose.yaml           app, oncall-agent, db, otel-lgtm; one command; every ${VAR} has a default
+├── Dockerfile, .dockerignore   multi-stage: node builds web/, then the Python image serving SPA + API; APP_VERSION build arg
+├── .env.example           every variable, no secrets
+├── pyproject.toml, uv.lock, .python-version   one package for app and worker; `[tool.uv] package = false`
+├── alembic.ini, alembic/  migrations; env.py reads DATABASE_URL from app.settings; first revision in issue 02
+├── app/                   FastAPI package: main.py, settings.py, db.py, routers/health.py; app/oncall/ is the worker (idle stub; loop in issue 08); app/static/ is the built SPA (git-ignored)
+├── tests/                 conftest.py, unit/ (no database), integration/ (real Postgres on localhost:5432); oncall/ (issue 08)
+├── web/                   React 18 + TypeScript + Vite; Vitest + Testing Library in src/__tests__/; `npm run build` -> dist/, copied into app/static by the Dockerfile
 ├── observability/         otel-lgtm config + Grafana provisioning, all in-repo (issue 09)
 ├── fixtures/              valid.csv, update.csv, invalid.csv           (issue 03)
 ├── _docs/                 spec, spec-review, process, architecture, api, testing, operations, rubric, backlog, team/, adr/, evidence/
@@ -65,9 +65,13 @@ issue lands; the engineer who makes one work replaces the placeholder here.
 ```
 gh issue list --label final-project --state open     # the backlog
 gh issue view <n> --comments                          # one issue with its groom / QA comments
-docker compose up --build                             # app :8000 (SPA + API), db, Grafana :3000, worker (issue 01)
-docker compose down -v                                # stop and drop the data volume   (issue 01)
-<single test command>                                 # all unit + integration + frontend tests (issue 06)
+docker compose up --build                             # app :8000 (SPA + API), db :5432, Grafana :3000, idle worker
+docker compose up --build -d --wait                   # same, detached; returns once /api/health reports db: ok
+docker compose down -v                                # stop and drop the data volume
+uv run pytest tests/unit                              # backend unit tests; no database needed
+uv run pytest tests/integration                       # backend integration tests against the Compose db (localhost:5432)
+npm --prefix web test                                 # frontend tests (Vitest + Testing Library)
+<single test command>                                 # all of the above in one go (issue 06)
 docker compose exec app python -m app.oncall tools <tool> [args]   # run one agent tool by hand (issue 08)
 ```
 

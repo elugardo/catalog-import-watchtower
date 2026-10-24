@@ -88,6 +88,15 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     ports:
       - "3000:3000"
+    healthcheck:
+      # The image's own check, with a start period: on a slow cold start the
+      # bundled services need more than its 3 x 30 s before they all answer,
+      # and without the grace `docker compose up --wait` would give up early.
+      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
 
 volumes:
   pgdata:

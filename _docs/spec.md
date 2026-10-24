@@ -145,7 +145,7 @@ Define these operations in `openapi.yaml` *before* implementing backend/frontend
 | `GET` | `/api/vendors` | Vendor filter options |
 | `GET` | `/api/products?vendor_id=...` | Catalog products; `vendor_id` optional (all vendors without it), newest `updated_at` first, `limit`/`offset` |
 | `GET` | `/api/alerts` | Current/recent incident summaries |
-| `GET` | `/api/health` | Always 200 while the process is up; body `{ "status", "db": "ok"\|"error", "agent_enabled", "version" }` (version = image SHA) |
+| `GET` | `/api/health` | Always 200 while the process is up; body `{ "status": "ok"\|"degraded", "db": "ok"\|"error", "agent_enabled", "version" }`; `status` is `degraded` when `db` is `error` (version = image SHA) |
 
 The agent's tools are **not HTTP endpoints**: the worker shares the backend's service layer (§4 F5), so the MVP has no internal routes and no internal token; the permissions and audited behaviour live in the tool functions. Concurrent duplicate retries are made safe with `SELECT … FOR UPDATE` on the import row; after the lock, status and attempt count are re-read, and a failed guard returns the current state as a no-op rather than an error. Lists return `{ "items": [...], "total": n }`, newest first, with `limit` (default 50, max 100) and `offset`. Use the stable JSON error shape `{ "code": "...", "message": "...", "details": [...] }` and return appropriate 4xx for malformed requests. A completed or failed import returned by `POST /api/imports` is still a successfully created resource (HTTP 201); its *processing status* appears in the body.
 
@@ -158,11 +158,11 @@ The agent's tools are **not HTTP endpoints**: the worker shares the backend's se
 1. `app`: one image. A multi-stage Dockerfile builds the SPA and the FastAPI process serves it at `/` and the API at `/api` (same origin, no proxy, no CORS). It validates CSV, performs transactional upserts, owns import status/alert logic, runs `alembic upgrade head` from its entrypoint, and exports OpenTelemetry. During development the Vite dev server proxies `/api` to it.
 2. `oncall-agent`: the same image started with `python -m app.oncall`; polls open alerts and runs the LLM tool-calling loop against the shared service layer.
 3. `db`: PostgreSQL with a named persistent volume locally; a managed PostgreSQL per environment when deployed.
-4. `observability`: locally the single `grafana/otel-lgtm` container (OpenTelemetry Collector, Prometheus, Loki, Tempo, Grafana) with dashboards and the alert rule provisioned from the repo. Deployed environments run with the exporter disabled unless a hosted backend is a trivial addition (optional, not required by the rubric).
+4. `otel-lgtm` (observability): locally the single `grafana/otel-lgtm` container (OpenTelemetry Collector, Prometheus, Loki, Tempo, Grafana) with dashboards and the alert rule provisioned from the repo. Deployed environments run with the exporter disabled unless a hosted backend is a trivial addition (optional, not required by the rubric).
 
 No Redis, Celery, Kubernetes, nginx, additional microservices, or third-party vendor catalog APIs for the MVP. Synchronous small-file processing is acceptable; the on-call agent executes independently after the upload request returns. Source bytes and state persist in Postgres.
 
-**Local launch:** `docker compose up --build` starts `app`, `oncall-agent`, `db` and `observability` with one command. The app works without LLM credentials; configure the chosen provider's key and `AGENT_ENABLED=true` to enable real automated recovery. Supply `.env.example` without secrets.
+**Local launch:** `docker compose up --build` starts `app`, `oncall-agent`, `db` and `otel-lgtm` with one command. The app works without LLM credentials; configure the chosen provider's key and `AGENT_ENABLED=true` to enable real automated recovery. Supply `.env.example` without secrets.
 
 ## 9. Testing and acceptance scenarios
 

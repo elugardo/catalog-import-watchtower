@@ -1,0 +1,117 @@
+# AGENTS.md — Catalog Import Watchtower
+
+**Catalog Import Watchtower (CIW)** is a small full-stack web app that imports
+vendor product catalogs from CSV files, validates every row before writing
+anything, upserts products in one transaction, and keeps a history of imports
+and their attempts. A failed import raises a durable **user-impact alert**. A
+separate, LLM-powered **on-call worker** reads the incident through a narrow
+tool allowlist, retries a transient failure once, escalates everything else,
+and leaves an audit trail in the database. It is the final project for the AI
+Dev Tools Zoomcamp 2026.
+
+**This folder is the whole project.** It is moving to its own public
+repository, `elugardo/catalog-import-watchtower` (ADR-0001); until then it
+lives as `finalproject/` in the course repo and must not import, read, or
+depend on any sibling folder. Open your coding session at this folder's root
+so that `.claude/`, `.agents/` and this file are the ones picked up. Every
+path in these docs is relative to this folder.
+
+## Read this first
+
+| When | Read |
+|---|---|
+| Always, before any task | this file, then [`_docs/process.md`](_docs/process.md) |
+| Deciding what to build, or whether something is in scope | [`_docs/spec.md`](_docs/spec.md) — the product and engineering spec; the only source of truth for scope |
+| Turning the spec into issues, or grooming one | [`_docs/team/product-manager.md`](_docs/team/product-manager.md), [`_docs/issue-template.md`](_docs/issue-template.md), [`_docs/backlog.md`](_docs/backlog.md) |
+| Implementing an issue | [`_docs/team/software-engineer.md`](_docs/team/software-engineer.md) |
+| Verifying an issue | [`_docs/team/qa-engineer.md`](_docs/team/qa-engineer.md) |
+| Touching models, services, Compose, or the folder layout | [`_docs/architecture.md`](_docs/architecture.md) |
+| Touching an endpoint, a request/response shape, or an error code | [`_docs/api.md`](_docs/api.md), then `openapi.yaml` (the contract, from issue 02 on) |
+| Writing or reviewing tests | [`_docs/testing.md`](_docs/testing.md) |
+| Telemetry, alerts, env vars, deployment, rollback, the real-LLM demo | [`_docs/operations.md`](_docs/operations.md) |
+| Working on the runtime on-call worker, or triaging an incident by hand | [`_docs/team/oncall-agent.md`](_docs/team/oncall-agent.md) and [`.agents/skills/incident-response/SKILL.md`](.agents/skills/incident-response/SKILL.md) |
+| Checking that a deliverable earns its points | [`_docs/rubric.md`](_docs/rubric.md) |
+| Making a decision that is hard to reverse (provider, repo layout, schema, auth between services) | write an ADR in [`_docs/adr/`](_docs/adr/) first |
+
+## Layout
+
+Planned layout. Folders marked *(issue NN)* do not exist until that issue
+lands; whoever creates one updates this section in the same PR.
+
+```
+<repo root>/
+├── AGENTS.md, CLAUDE.md, README.md
+├── .github/workflows/     ci.yml, deploy-dev.yml, promote-prod.yml        (issue 10)
+├── openapi.yaml           API contract, written before the code       (issue 02)
+├── compose.yaml           app, oncall-agent, db, otel-lgtm; one command (issue 01)
+├── Dockerfile             multi-stage: builds web/, then the Python image serving SPA + API (issue 01)
+├── .env.example           every variable, no secrets                   (issue 01)
+├── pyproject.toml, uv.lock                                             (issue 01)
+├── app/                   FastAPI + SQLAlchemy + Alembic package; app/oncall/ is the worker (issue 01, 08)
+├── alembic/               migrations                                   (issue 02)
+├── tests/                 unit/, integration/ (real Postgres), oncall/ (issue 01 on)
+├── web/                   React + TypeScript + Vite; Vitest; built into app/static (issue 01)
+├── observability/         otel-lgtm config + Grafana provisioning, all in-repo (issue 09)
+├── fixtures/              valid.csv, update.csv, invalid.csv           (issue 03)
+├── _docs/                 spec, spec-review, process, architecture, api, testing, operations, rubric, backlog, team/, adr/, evidence/
+├── .agents/skills/        incident-response/SKILL.md (canonical skill)
+└── .claude/               agents/ (PM, engineer, QA), skills/
+```
+
+## Commands
+
+Run from `finalproject/`. Commands marked *(issue NN)* become real when that
+issue lands; the engineer who makes one work replaces the placeholder here.
+
+```
+gh issue list --label final-project --state open     # the backlog
+gh issue view <n> --comments                          # one issue with its groom / QA comments
+docker compose up --build                             # app :8000 (SPA + API), db, Grafana :3000, worker (issue 01)
+docker compose down -v                                # stop and drop the data volume   (issue 01)
+<single test command>                                 # all unit + integration + frontend tests (issue 06)
+docker compose exec app python -m app.oncall tools <tool> [args]   # run one agent tool by hand (issue 08)
+```
+
+## Rules
+
+Short, because the spec is long. Each rule here is one that is easy to break
+while looking right.
+
+- **No issue, no work.** Every change belongs to an open GitHub issue with
+  acceptance criteria. Reference it as `Refs #N` in commits; never `Closes #N`
+  (closing happens after QA, see `_docs/process.md`).
+- **Scope is `_docs/spec.md`.** Section 3 lists the non-goals; they stay out.
+  If the spec is wrong or silent, stop and say so; the PM changes the spec, then
+  the issue, then the code.
+- **Validate the whole file, then write everything or nothing.** One invalid
+  row means zero product changes. The batch is one database transaction.
+- **Upsert by `(vendor_id, normalized_sku)`; never full replacement.** SKUs
+  missing from a later upload are left alone.
+- **Money is integer cents. Timestamps are UTC.** No floats for price, ever.
+- **`Recovered` is a UI label**, not a status. Statuses are `PROCESSING`,
+  `COMPLETED`, `FAILED`; a `COMPLETED` import with more than one attempt shows
+  as recovered.
+- **The on-call agent is a real LLM with tool calling**, limited to the six
+  allowlisted tools in `_docs/team/oncall-agent.md`. It retries only
+  `TRANSIENT_STORAGE_TIMEOUT`, at most once (two attempts total). Nothing else
+  is retried automatically. Without credentials the app still works and the
+  alert stays open with the agent marked unavailable.
+- **Never send catalog content to the LLM or to telemetry.** No CSV rows,
+  vendor names, product names, tokens, or credentials in prompts, spans, logs,
+  or metric labels. Metric labels are low-cardinality only; `import_id` and
+  `trace_id` go in logs and spans, not labels.
+- **The failure injector is synthetic and is described as such** in the UI
+  label, the README and the demo.
+- **Secrets live in `.env`, which is never committed.** `.env.example` lists
+  every variable with a safe placeholder.
+- **Dependencies** go through `uv add` (one `pyproject.toml` for the app and
+  the worker) and `npm install` (web), with the lock files committed. Do not
+  add a queue, a cache, nginx, an extra service, or a UI framework; the stack
+  is fixed in `_docs/architecture.md`. PostgreSQL everywhere, never SQLite.
+- **One image, two processes.** The worker is `python -m app.oncall` on the
+  same image and calls the service layer; there are no internal HTTP
+  endpoints and no internal token.
+- **Everything is configuration in the repo.** Compose, Collector, Grafana
+  dashboards and alert rules, CI workflows. Nothing is clicked together by hand.
+- **These documents are living.** After a correction ("don't do it that way"),
+  update the document that should have prevented it, in the same PR.

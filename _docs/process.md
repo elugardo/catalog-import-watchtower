@@ -28,12 +28,23 @@ optional.
    posts one comment on the issue ending in `PASS` or `FAIL`.
 7. **On FAIL**, the engineer fixes it on the same branch and goes back to
    step 4. The QA comment is the input; do not argue with it in code.
-8. **On PASS**, the human (Marcos) reviews and merges the PR. This is the human
-   review gate that the README's AI-workflow section describes.
-9. **Close only after the evidence is recorded** in the issue's final comment:
-   the merged PR, the CI run, the QA comment, and whatever the rubric row in
-   [`rubric.md`](rubric.md) asks for (a screenshot, a URL, a trace id). The
-   orchestrator closes the issue with `gh issue close <n> --comment "..."`.
+8. **On PASS, request PM approval.** The PM reads the issue, the QA comment
+   and the PR description (not the diff), confirms that every acceptance
+   criterion has a QA verdict of *met*, that nothing outside the issue's
+   scope was built, that the docs named in *Constraints* were updated and
+   that the rubric evidence the issue asked for exists, and posts one comment
+   ending in `APPROVED` or `CHANGES REQUESTED` (with the list). On
+   `CHANGES REQUESTED` the engineer fixes it and the loop goes back to
+   step 4.
+9. **On APPROVED, the orchestrator merges** with `gh pr merge <pr> --squash
+   --delete-branch` once CI is green, then **closes the issue with the
+   evidence** in its final comment: the merged PR and commit SHA, the CI
+   run, the QA comment, the PM approval, and whatever the rubric row in
+   [`rubric.md`](rubric.md) asks for (a screenshot, a URL, a trace id). Then
+   it moves on to the next issue whose dependencies are closed. Marcos is
+   not a merge gate: he reviews the record asynchronously and reopens an
+   issue if something is wrong (decided 2026-10-24; before that, he merged
+   every PR by hand).
 
 ## Before the loop: building the backlog
 
@@ -92,17 +103,22 @@ role files) and does not groom, implement or test itself. Shortcuts:
 - `Groom issue #12` → PM subagent.
 - `Implement issue #12` → engineer subagent.
 - `Test issue #12` → QA subagent, fresh context.
-- `/work-issue 12` → the whole cycle for one issue
+- `Approve issue #12` → PM subagent, after QA PASS.
+- `/work-issue 12` → the whole cycle for one issue, through the merge
   ([`.claude/skills/work-issue/SKILL.md`](../.claude/skills/work-issue/SKILL.md)).
 
 ```
-  PM ──▶ Engineer ──▶ QA ──PASS──▶ human merge ──▶ close with evidence
-              ▲        │
-              └──FAIL──┘
+  PM groom ──▶ Engineer ──▶ QA ──PASS──▶ PM approve ──APPROVED──▶ merge ──▶ close with evidence
+                  ▲          │                 │
+                  ├───FAIL───┘                 │
+                  └──────CHANGES REQUESTED─────┘
 ```
 
-Rules: step 2 is never skipped; the engineer never closes; QA never fixes; the
-orchestrator closes only after PASS *and* merge *and* recorded evidence.
+Rules: step 2 is never skipped; the engineer never closes or merges; QA never
+fixes; the PM never writes code; the orchestrator merges only after PASS
+*and* APPROVED *and* green CI, and closes only after the evidence is
+recorded. The human review is of the record, not a gate in front of the
+merge.
 
 Separate roles buy independence, not ceremony: an engineer's green suite proves
 the tests pass, not that the criteria are met. A fresh reader checking the

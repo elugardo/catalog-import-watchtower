@@ -1,6 +1,6 @@
 ---
 name: work-issue
-description: Run the full groom → implement → QA cycle for one GitHub issue of Catalog Import Watchtower as the orchestrator, stopping at the human merge gate. Usage - /work-issue <issue number>
+description: Run the full groom → implement → QA → PM approval → merge → close cycle for one GitHub issue of Catalog Import Watchtower as the orchestrator, then continue with the next unblocked issue. Usage - /work-issue <issue number>
 ---
 
 # Work one issue
@@ -23,11 +23,25 @@ do not groom, implement or test yourself. The argument is the issue number.
 5. **On FAIL**, launch a new `software-engineer` agent with "Fix issue #<n>
    per the QA comment <link>" and go back to step 4. After three FAILs in a
    row, stop and summarize for Marcos instead of looping.
-6. **On PASS**, stop. Tell Marcos the PR is ready to review and merge, with
-   the PR link, the QA comment link, and the CI run link. Do not merge.
-7. **After Marcos merges** (he will say so, or you see the PR merged on the
-   next run): post the closing comment with the evidence listed in
-   `_docs/issue-template.md` → *Evidence*, then `gh issue close <n>`.
+6. **On PASS, get PM approval.** Launch the `product-manager` agent with
+   "Approve issue #<n>, PR #<pr>". It posts one comment ending in `APPROVED`
+   or `CHANGES REQUESTED`. On `CHANGES REQUESTED`, treat it like a FAIL:
+   launch a `software-engineer` agent with "Fix issue #<n> per the PM
+   comment <link>" and go back to step 4 (the same three-strikes rule
+   applies, counting FAILs and CHANGES REQUESTED together).
+7. **On APPROVED, merge.** Confirm the PR's CI is green (`gh pr checks <pr>`),
+   then `gh pr merge <pr> --squash --delete-branch`. If CI is red or the
+   merge is blocked, stop and tell Marcos why; never bypass a check.
+8. **Close with evidence.** Post the closing comment with the evidence listed
+   in `_docs/issue-template.md` → *Evidence* (merged PR and commit SHA, CI
+   run, QA comment, PM approval, rubric artefacts), then `gh issue close <n>`.
+   Pull `main` locally so the next branch starts from the merge.
+9. **Continue.** Tell Marcos in one short paragraph what was merged and the
+   links, then pick the lowest-numbered open issue whose dependencies in
+   `_docs/backlog.md` are all closed and start again at step 1. Stop only
+   when no issue is unblocked, when an issue needs a decision only Marcos
+   can make (a spec change, a secret, a provider account), or after three
+   strikes on one issue.
 
 Keep your own context small: read reports, not diffs. Every hand-off and
 verdict must already be a comment on the issue; if a subagent forgot, ask it

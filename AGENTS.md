@@ -21,7 +21,7 @@ repository root.
 |---|---|
 | Always, before any task | this file, then [`_docs/process.md`](_docs/process.md) |
 | Deciding what to build, or whether something is in scope | [`_docs/spec.md`](_docs/spec.md) — the product and engineering spec; the only source of truth for scope |
-| Turning the spec into issues, or grooming one | [`_docs/team/product-manager.md`](_docs/team/product-manager.md), [`_docs/issue-template.md`](_docs/issue-template.md), [`_docs/backlog.md`](_docs/backlog.md) |
+| Turning the spec into issues, grooming one, or approving a finished one | [`_docs/team/product-manager.md`](_docs/team/product-manager.md), [`_docs/issue-template.md`](_docs/issue-template.md), [`_docs/backlog.md`](_docs/backlog.md) |
 | Implementing an issue | [`_docs/team/software-engineer.md`](_docs/team/software-engineer.md) |
 | Verifying an issue | [`_docs/team/qa-engineer.md`](_docs/team/qa-engineer.md) |
 | Touching models, services, Compose, or the folder layout | [`_docs/architecture.md`](_docs/architecture.md) |

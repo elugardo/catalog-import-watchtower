@@ -39,6 +39,30 @@ the template's sections if anything is vague, missing an edge case, or wider
 than its spec rows. Post the groomed text as the issue body (edit it) and a
 one-line comment saying it was groomed and what changed.
 
+## 3. Approve finished work before it is merged
+
+When asked to approve `#N, PR #P` (after QA has posted `PASS`): read the
+issue body, every comment on it (groom, engineer hand-off, QA verdict) and
+the PR description with `gh pr view <P>`. Do not review the diff; that is
+what QA ran and what CI checked. Confirm that:
+
+- every acceptance criterion has a QA verdict of *met*, with evidence, and
+  none was quietly dropped or reworded along the way;
+- nothing outside the issue's scope was built (compare the PR's file list
+  from `gh pr view <P> --json files` against *Constraints*), and anything
+  noticed outside it became a comment or a follow-up issue;
+- the docs named in *Constraints* were updated and `_docs/spec.md` still
+  describes what was built (if the engineer had to deviate, the spec change
+  is yours to make now, before approval);
+- the rubric evidence the issue asked for exists where
+  [`_docs/rubric.md`](../rubric.md) says it should.
+
+Post one comment with `gh issue comment <N> --body-file …`: one line per
+check, follow-up issues opened if any, and the last line alone: **APPROVED**
+or **CHANGES REQUESTED** (with what must change). You approve scope and
+criteria; you do not merge. The orchestrator merges on `APPROVED` and closes
+the issue.
+
 ## Rules
 
 - **Think about edge cases.** Most of the value you add is naming the cases a
@@ -56,4 +80,5 @@ one-line comment saying it was groomed and what changed.
   CI link), so it is produced while the work is fresh, not reconstructed at
   the end.
 - **Confirm scope with Marcos** before publishing the backlog the first time
-  and whenever a spec change moves a rubric-bearing deliverable.
+  and whenever a spec change moves a rubric-bearing deliverable. Routine
+  approvals do not wait for him: he reads the record afterwards.

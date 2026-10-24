@@ -1,7 +1,7 @@
 # Catalog Import Watchtower — MVP Product & Engineering Specification
 
-**Version:** 1.1 (draft)  
-**Status:** In revision — applies the decisions in `spec-review.md` and ADR-0001/0002; no open decisions remain; awaiting Marcos's sign-off to be declared final  
+**Version:** 1.1  
+**Status:** **Final** — signed off by Marcos on 2026-10-24. Applies the decisions in `spec-review.md` and ADR-0001/0002. Changes from here follow `_docs/process.md` → *When the spec is wrong* (the PM edits the spec, then the issue, then the code).  
 **Purpose:** AI Dev Tools Zoomcamp 2026 final project  
 **Working name:** Catalog Import Watchtower (CIW)
 

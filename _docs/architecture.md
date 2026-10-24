@@ -157,9 +157,9 @@ LLM key, both in `.env` / provider secrets.
 
 ## Decided elsewhere
 
-- **ADR-0001:** the project stays in the course monorepo; the three
-  workflow files at the repo root are the only project files outside
-  `finalproject/`.
+- **ADR-0001:** the project is its own public repository
+  (`elugardo/catalog-import-watchtower`); the workflows live in
+  `.github/workflows/` at its root, with no path filters.
 - **ADR-0002:** Fly.io apps `ciw-dev` / `ciw-prod` with `app` and `worker`
   process groups from the same image, Neon PostgreSQL per environment,
   public image in GHCR, telemetry exporter disabled when deployed, agent

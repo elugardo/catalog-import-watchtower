@@ -1,9 +1,9 @@
 # Backlog
 
-> **Gate: the spec is still being written.** Nothing here is published to
-> GitHub until Marcos says `_docs/spec.md` is final. Until then this table is
-> a preview of the shape, not a to-do list; the PM must not create issues from
-> it, and the orchestrator must not start `/work-issue`.
+> **Gate open: `_docs/spec.md` v1.1 was declared final by Marcos on
+> 2026-10-24.** The PM may publish this table as GitHub issues (one pass, in
+> the order below) and `/work-issue` may start once the issue numbers are
+> recorded here.
 
 Spec §13, as it will exist in the public tracker. The **PM** creates one
 public GitHub issue per row with [`issue-template.md`](issue-template.md) and

@@ -3,8 +3,9 @@
 > **Status 2026-10-24:** Marcos accepted sections A to C; they are applied
 > in `spec.md` v1.1. §F is decided: option F1, with the key kept on Marcos's
 > machine only (CI uses a fake LLM, deployed environments run with the agent
-> disabled). ADR-0001 (monorepo) and ADR-0002 (Fly.io + Neon + GHCR) are
-> accepted. Nothing remains open; the spec awaits Marcos's sign-off.
+> disabled). ADR-0001 (own repository) and ADR-0002 (Fly.io + Neon + GHCR)
+> are accepted. **Marcos signed off `spec.md` v1.1 as final on 2026-10-24**;
+> this review is closed and kept as the record of how v1.0 became v1.1.
 
 ## F. Decided: does the running project need an LLM?
 

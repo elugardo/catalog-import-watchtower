@@ -9,9 +9,10 @@ else, and records what it did.
 
 Final project for the AI Dev Tools Zoomcamp 2026 (the course work lives in [`elugardo/ai-dev-tools-zoomcamp`](https://github.com/elugardo/ai-dev-tools-zoomcamp)).
 
-**Status: set-up phase.** The agent team and the process are in place and
-the specification is being finalized; the backlog is published and
-application code starts with issue CIW-01 only once the spec is final. This README is
+**Status: spec final, backlog being published.** The agent team and the
+process are in place and the specification was signed off on 2026-10-24;
+the backlog is being published as GitHub issues and application code starts
+with issue CIW-01. This README is
 rewritten by issue CIW-11 into the reviewer walkthrough (problem,
 architecture, quick start, tests, deployment, observability, AI workflow,
 limitations).

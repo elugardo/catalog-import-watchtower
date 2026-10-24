@@ -19,7 +19,7 @@ evidence.
 | 9 | CI/CD | 3 | CI on every PR **and** automatic CD to dev **and** manual promotion to prod, plus the rollback path | `.github/workflows/*`; links to one PR run, one dev deploy, one promotion run; rollback section in `operations.md` | 10 |
 | 10 | Observability | 2 | metrics + traces + structured logs sharing a trace id for the import journey, no customer data in telemetry, viewable in a UI | `observability/`; `_docs/evidence/` screenshots (trace, logs, dashboard); query examples in `operations.md` | 09 |
 | 11 | Alerting on user impact | 1 | at least one alert on actual user impact (a `FAILED` import), not host metrics | `alerts` rows in the UI; provisioned Grafana rule; screenshot of it firing | 05, 09 |
-| 12 | On-call agent | 2 | an agent wakes on the alert and fixes the issue | `oncall-agent/`; `_docs/evidence/<date>-real-llm-recovery/`; import detail with two attempts and the timeline | 08 |
+| 12 | On-call agent | 2 | an agent wakes on the alert and fixes the issue | `app/oncall/`; `_docs/evidence/<date>-real-llm-recovery/`; import detail with two attempts and the timeline | 08 |
 
 ## Submission checklist (course logistics)
 

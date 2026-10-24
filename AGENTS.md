@@ -59,7 +59,7 @@ lands; whoever creates one updates this section in the same PR.
 
 ## Commands
 
-Run from `finalproject/`. Commands marked *(issue NN)* become real when that
+Run from the repository root. Commands marked *(issue NN)* become real when that
 issue lands; the engineer who makes one work replaces the placeholder here.
 
 ```

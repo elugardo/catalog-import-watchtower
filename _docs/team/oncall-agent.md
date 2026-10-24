@@ -1,15 +1,16 @@
 # On-call agent (runtime)
 
 The on-call agent is the LLM-powered worker that ships *inside* the product
-(`oncall-agent/`). It is not a development-time role: it never reads or
+(`app/oncall/`, started as `python -m app.oncall`). It is not a
+development-time role: it never reads or
 writes code, never touches the repository, and never talks to a human. Its
 whole job is spec §4 F5: wake up on a failed-import alert, investigate
 through a narrow tool allowlist, recover a transient failure once, escalate
 everything else, and leave an auditable trail.
 
 This file is the authoritative description of its behaviour. The system
-prompt in `oncall-agent/` is derived from it; when they disagree, fix the
-prompt. The step-by-step routine it follows is
+prompt in `app/oncall/prompt.py` is derived from it; when they disagree, fix
+the prompt. The step-by-step routine it follows is
 [`.agents/skills/incident-response/SKILL.md`](../../.agents/skills/incident-response/SKILL.md).
 
 ## Trigger and claim

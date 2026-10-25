@@ -2,8 +2,12 @@
 
 Rows go in through the models (or plain SQL) inside the rolled-back `db`
 session; each rejected write runs in its own savepoint so the test can go on.
+Every vendor name carries a per-test token, so a database that already holds
+demo, fixture or QA vendors (for example "Sample Furnishings") cannot collide
+with the unique `normalized_name` (#31).
 """
 
+import uuid
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -48,7 +52,7 @@ def accepted(db: Session, statement_or_row) -> None:
             db.flush()
 
 
-def new_vendor(display_name: str = "Sample Furnishings") -> Vendor:
+def new_vendor(display_name: str) -> Vendor:
     return Vendor(display_name=display_name, normalized_name=display_name.strip().casefold())
 
 
@@ -75,8 +79,14 @@ def new_product(vendor: Vendor, sku: str = "CHAIR-001") -> Product:
 
 
 @pytest.fixture
-def vendor(db) -> Vendor:
-    return add(db, new_vendor())
+def token() -> str:
+    """Unique per test; appended to every vendor name the test inserts."""
+    return uuid.uuid4().hex[:12]
+
+
+@pytest.fixture
+def vendor(db, token) -> Vendor:
+    return add(db, new_vendor(f"Sample Furnishings {token}"))
 
 
 @pytest.fixture
@@ -97,18 +107,20 @@ def one_of_each(db, vendor) -> dict[str, int]:
 # ---- unique constraints -------------------------------------------------------------
 
 
-def test_vendor_normalized_name_is_unique(db, vendor):
-    duplicate = Vendor(display_name="SAMPLE FURNISHINGS", normalized_name="sample furnishings")
-    assert_rejected(db, duplicate)
+def test_vendor_normalized_name_is_unique(db, vendor, token):
+    # The same name differing only in case normalises to the same key: rejected.
+    shouted = vendor.display_name.upper()
+    assert shouted != vendor.display_name
+    assert_rejected(db, new_vendor(shouted))
 
-    accepted(db, new_vendor("Other Furnishings"))
+    accepted(db, new_vendor(f"Other Furnishings {token}"))
 
 
-def test_product_sku_is_unique_per_vendor_not_globally(db, vendor):
+def test_product_sku_is_unique_per_vendor_not_globally(db, vendor, token):
     add(db, new_product(vendor, "CHAIR-001"))
     assert_rejected(db, new_product(vendor, "chair-001"))
 
-    other_vendor = add(db, new_vendor("Second Vendor"))
+    other_vendor = add(db, new_vendor(f"Second Vendor {token}"))
     accepted(db, new_product(other_vendor, "CHAIR-001"))
 
 

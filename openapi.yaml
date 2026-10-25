@@ -113,6 +113,8 @@ paths:
                 $ref: "#/components/schemas/ImportList"
         "400":
           $ref: "#/components/responses/InvalidQuery"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/imports/{id}:
     get:
@@ -159,6 +161,8 @@ paths:
                 $ref: "#/components/schemas/VendorList"
         "400":
           $ref: "#/components/responses/InvalidQuery"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/products:
     get:
@@ -184,6 +188,8 @@ paths:
                 $ref: "#/components/schemas/ProductList"
         "400":
           $ref: "#/components/responses/InvalidQuery"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/alerts:
     get:
@@ -202,6 +208,8 @@ paths:
                 $ref: "#/components/schemas/AlertList"
         "400":
           $ref: "#/components/responses/InvalidQuery"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/health:
     get:
@@ -247,19 +255,27 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
           example: { code: INVALID_QUERY, message: limit must be between 1 and 100, details: [] }
+    InternalError:
+      description: "`INTERNAL_ERROR`: an unexpected failure, for example the database is unreachable; the message is generic."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: { code: INTERNAL_ERROR, message: internal error, details: [] }
 
   schemas:
     # ---- shared ---------------------------------------------------------------
     Error:
       type: object
-      description: The one error shape of every 4xx response.
+      description: The one error shape of every 4xx and 5xx response.
       required: [code, message, details]
       properties:
         code:
           type: string
           description: >-
             Stable, upper snake case: MISSING_FIELD, INVALID_FIELD, INVALID_CONTENT_TYPE,
-            INVALID_ENCODING, FILE_TOO_LARGE, INVALID_QUERY, NOT_FOUND, INTERNAL_ERROR.
+            INVALID_ENCODING, FILE_TOO_LARGE, INVALID_QUERY, NOT_FOUND, METHOD_NOT_ALLOWED,
+            INTERNAL_ERROR.
         message:
           type: string
         details:

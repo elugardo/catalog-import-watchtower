@@ -1,1 +1,5 @@
 fixtures/*.csv -text
+
+# Scripts the test container runs from the checkout (copied into the image by
+# Dockerfile.test) stay LF even on a Windows checkout with core.autocrlf=true.
+scripts/** text eol=lf

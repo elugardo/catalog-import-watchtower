@@ -1,0 +1,28 @@
+# Build context of Dockerfile.test (BuildKit reads <Dockerfile>.dockerignore
+# instead of .dockerignore). Unlike the runtime image, the test image needs
+# tests/, fixtures/ and the web sources; it still never gets secrets or the
+# host's toolchains (a Windows .venv or node_modules would not run on Linux).
+
+# Secrets and local config.
+.env
+.env.*
+
+# Host toolchains and build output (the image installs its own).
+.venv/
+**/node_modules/
+web/dist/
+web/coverage/
+app/static/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Not needed to run the tests.
+.git/
+.github/
+.claude/
+.agents/
+_docs/
+data/
+*.log

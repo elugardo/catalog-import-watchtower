@@ -1,0 +1,28 @@
+# Test overlay: adds the `test` service to the stack in compose.yaml. Not part
+# of the runtime stack; `docker compose up` without this file never sees it.
+#
+# The one test command (_docs/testing.md -> The one command):
+#
+#   docker compose -f compose.yaml -f compose.test.yaml run --rm --build test
+#
+# It starts the Compose `db` if it is not already running (a running stack is
+# left as it is), builds the test image from Dockerfile.test, and runs every
+# layer through scripts/run_tests.py. The pgdata volume and the rows in it are
+# kept: the integration tests clean up only what they created.
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: ciw-test:local
+    # Only `run test` starts it, even when this overlay is passed to `up`.
+    profiles: ["test"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://ciw:ciw@db:5432/ciw
+      DATABASE_CONNECT_TIMEOUT_SECONDS: "2"
+      AGENT_ENABLED: "false"
+      OTEL_SDK_DISABLED: "true"
+    depends_on:
+      db:
+        condition: service_healthy

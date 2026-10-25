@@ -1,0 +1,42 @@
+# Test image for the one test command (`compose.test.yaml`, service `test`).
+# Never deployed. Python 3.12 with the dev dependency group, Node 22 with the
+# web devDependencies, and the whole checkout (tests, fixtures, openapi.yaml)
+# copied in, so nothing on the host is mounted, used or modified.
+#
+# Separate from `Dockerfile` because that build context's `.dockerignore`
+# keeps `tests/` out of the runtime image; this file has its own ignore file,
+# `Dockerfile.test.dockerignore`, which BuildKit uses instead.
+
+FROM node:22-bookworm-slim AS node
+
+FROM python:3.12-slim
+
+# Node and npm from the official Debian (glibc) image; Vitest's native
+# bindings need glibc, so the alpine build of stage `web` would not run here.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+ && node --version && npm --version
+
+COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /uvx /bin/
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON=/usr/local/bin/python3.12 \
+    PATH="/opt/venv/bin:${PATH}" \
+    CI=true
+
+WORKDIR /src
+
+# Dependencies first so they cache independently of the source.
+COPY pyproject.toml uv.lock .python-version ./
+RUN uv sync --frozen --no-install-project
+COPY web/package.json web/package-lock.json ./web/
+RUN npm --prefix web ci --no-audit --no-fund
+
+COPY . .
+
+CMD ["python", "scripts/run_tests.py"]

@@ -131,7 +131,7 @@ def create_import(upload: Annotated[UploadRequest, Depends(read_upload)]) -> Imp
     "/imports",
     response_model=Page[ImportOut],
     summary="Recent imports, newest first",
-    responses={400: {"model": ErrorOut}},
+    responses={400: {"model": ErrorOut}, 500: {"model": ErrorOut}},
 )
 def list_imports(limit: Limit = DEFAULT_LIMIT, offset: Offset = 0) -> Page[ImportOut]:
     """The import resource without `attempts`, `alert` and `agent_actions`."""

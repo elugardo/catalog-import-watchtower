@@ -2,14 +2,19 @@
 
 - `create_import` finds or creates the vendor and inserts the import as
   `PROCESSING`, each in its own committed transaction (steps 1).
-- `run_attempt` inserts the attempt as `RUNNING` (own transaction), validates
-  the whole file, then either records `FAILED` / `VALIDATION_ERROR` with no
-  product write, or upserts every row and marks the import `COMPLETED` in one
-  transaction. The synthetic failure injector raises at the start of that
-  transaction, before any product statement, on attempt 1 only. Any exception
-  in that transaction rolls it back: the injected fault and a real
-  `OperationalError` end `FAILED` / `TRANSIENT_STORAGE_TIMEOUT`, anything else
-  `FAILED` / `INTERNAL_ERROR`.
+- `run_attempt` inserts the attempt as `RUNNING` (own transaction,
+  `begin_attempt`), then `process_attempt` validates the whole file and either
+  records `FAILED` / `VALIDATION_ERROR` with no product write, or upserts every
+  row and marks the import `COMPLETED` in one transaction. The synthetic
+  failure injector raises at the start of that transaction, before any product
+  statement, on attempt 1 only. Any exception in that transaction rolls it
+  back: the injected fault and a real `OperationalError` end `FAILED` /
+  `TRANSIENT_STORAGE_TIMEOUT`, anything else `FAILED` / `INTERNAL_ERROR`.
+- The retry (`app/services/agent_tools.py`) calls `begin_attempt` for attempt
+  2 inside its locked transaction, which sets the import back to
+  `PROCESSING`, and then the same `process_attempt`. Every end-state write is
+  compare-and-set on a `PROCESSING` import with a `RUNNING` attempt, so the
+  startup sweep and a live attempt 2 never both write an outcome (step 5).
 - Every `FAILED` transition writes the import's alert in the same short
   transaction (`app/services/alerts.py`); a success never touches the alert.
 - `sweep_stuck_imports` is the startup crash recovery (step 5), alert included.
@@ -85,18 +90,50 @@ def create_import(request: UploadRequest) -> int:
 def run_attempt(import_id: int, attempt_number: int) -> None:
     """Process one attempt of an import whose row already exists. Never raises for bad data.
 
-    `attempt_number` is 1 from the upload; the agent's retry (CIW-08.1) passes 2.
+    `attempt_number` is 1 from the upload. The agent's retry does not call this:
+    `agent_tools.retry_failed_import` runs `begin_attempt` inside its locked
+    transaction and then `process_attempt`, the same processing.
+    """
+    with _session() as session, session.begin():
+        attempt_id = begin_attempt(session, import_id, attempt_number)
+    process_attempt(import_id, attempt_id, attempt_number)
+
+
+def begin_attempt(session: Session, import_id: int, attempt_number: int) -> int:
+    """Insert attempt *n* as `RUNNING`, inside the caller's transaction; returns its id.
+
+    For attempt 2 (the retry) the import goes back to `PROCESSING` in the same
+    transaction, so the one crash state of spec section 4 F2 ("`PROCESSING`
+    with a `RUNNING` attempt") holds for every attempt and the startup sweep
+    finds a crashed retry. `failure_code` is left as it is until the attempt ends.
+
+    No guard here: the retry's guard and row lock are the caller's
+    (`agent_tools.retry_failed_import`), which holds `SELECT … FOR UPDATE` on
+    the import when it calls this.
+    """
+    if attempt_number > 1:
+        session.execute(update(Import).where(Import.id == import_id).values(status="PROCESSING"))
+    attempt = ImportAttempt(import_id=import_id, attempt_number=attempt_number, status="RUNNING")
+    session.add(attempt)
+    session.flush()
+    return attempt.id
+
+
+def process_attempt(import_id: int, attempt_id: int, attempt_number: int) -> None:
+    """Validate, upsert and record the outcome of a `RUNNING` attempt. Never raises for bad data.
+
     The injection flag is read from the persisted import row, never from a
-    setting, so an injected upload affects no other import.
+    setting, so an injected upload affects no other import; it applies to
+    attempt 1 only.
+
+    Every end-state write is compare-and-set on the import still being
+    `PROCESSING` and the attempt `RUNNING`. The startup sweep in `app` can fail
+    a retry that is still live in `oncall-agent` or the CLI; whichever writer
+    locks the import row first wins, and the other changes nothing
+    (`_docs/architecture.md` -> *Import processing*, step 5).
     """
     with _session() as session:
         with session.begin():
-            attempt = ImportAttempt(
-                import_id=import_id, attempt_number=attempt_number, status="RUNNING"
-            )
-            session.add(attempt)
-            session.flush()
-            attempt_id = attempt.id
             row = session.execute(
                 select(Import.vendor_id, Import.csv_bytes, Import.inject_transient_failure).where(
                     Import.id == import_id
@@ -109,7 +146,7 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
         if result.errors:
             # Validation wins over injection: the flag is never looked at here.
             with session.begin():
-                _finish(
+                finished = _finish(
                     session,
                     import_id,
                     attempt_id,
@@ -121,11 +158,15 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
                         "validation_error_count": result.error_count,
                     },
                 )
-                alert_id = alerts.record_failure_alert(
-                    session,
-                    import_id,
-                    alerts.validation_reason(attempt_number, result.error_count),
-                )
+                if finished:
+                    alert_id = alerts.record_failure_alert(
+                        session,
+                        import_id,
+                        alerts.validation_reason(attempt_number, result.error_count),
+                    )
+            if not finished:
+                _log_superseded(import_id, attempt_number)
+                return
             log.info(
                 "import %d attempt %d failed: VALIDATION_ERROR, %d errors",
                 import_id,
@@ -137,25 +178,31 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
 
         try:
             # One transaction: every product row and the COMPLETED transition
-            # commit together, or nothing does.
+            # commit together, or nothing does. It starts by locking the
+            # import and the attempt (the sweep's order, so the two never
+            # deadlock): a sweep that arrives later waits for this commit and
+            # then finds nothing to do; a sweep that came first leaves an
+            # import that is no longer PROCESSING, and nothing is written.
             with session.begin():
-                if inject:
-                    raise InjectedTransientFailure
-                _upsert_products(session, vendor_id, result.rows)
-                _finish(
-                    session,
-                    import_id,
-                    attempt_id,
-                    succeeded=True,
-                    code=None,
-                    import_values={
-                        "row_count": result.row_count,
-                        "product_count": len(result.rows),
-                        "completed_at": func.now(),
-                        "validation_errors_json": [],
-                        "validation_error_count": 0,
-                    },
-                )
+                live = _lock_live_attempt(session, import_id, attempt_id)
+                if live:
+                    if inject:
+                        raise InjectedTransientFailure
+                    _upsert_products(session, vendor_id, result.rows)
+                    _finish(
+                        session,
+                        import_id,
+                        attempt_id,
+                        succeeded=True,
+                        code=None,
+                        import_values={
+                            "row_count": result.row_count,
+                            "product_count": len(result.rows),
+                            "completed_at": func.now(),
+                            "validation_errors_json": [],
+                            "validation_error_count": 0,
+                        },
+                    )
         except Exception as exc:  # noqa: BLE001 - every runtime failure ends the attempt
             code, reason = _classify(exc, attempt_number)
             log.error(
@@ -168,7 +215,7 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
             # If this write raises too, the request answers 500 and the import
             # stays PROCESSING with no alert until the next startup sweep.
             with session.begin():
-                _finish(
+                finished = _finish(
                     session,
                     import_id,
                     attempt_id,
@@ -176,14 +223,45 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
                     code=code,
                     import_values={"row_count": result.row_count},
                 )
-                alert_id = alerts.record_failure_alert(session, import_id, reason)
-            _log_alert(alert_id, import_id, code, attempt_number)
+                if finished:
+                    alert_id = alerts.record_failure_alert(session, import_id, reason)
+            if finished:
+                _log_alert(alert_id, import_id, code, attempt_number)
+            else:
+                _log_superseded(import_id, attempt_number)
             return
+    if not live:
+        _log_superseded(import_id, attempt_number)
+        return
     log.info(
         "import %d attempt %d completed: %d products",
         import_id,
         attempt_number,
         len(result.rows),
+    )
+
+
+def _lock_live_attempt(session: Session, import_id: int, attempt_id: int) -> bool:
+    """Lock the import row, then the attempt row; True when still `PROCESSING` / `RUNNING`.
+
+    The lock order is the sweep's (imports, then their attempts), so an
+    attempt's end-state write and the sweep never deadlock.
+    """
+    import_status = session.execute(
+        select(Import.status).where(Import.id == import_id).with_for_update()
+    ).scalar_one()
+    attempt_status = session.execute(
+        select(ImportAttempt.status).where(ImportAttempt.id == attempt_id).with_for_update()
+    ).scalar_one()
+    return import_status == "PROCESSING" and attempt_status == "RUNNING"
+
+
+def _log_superseded(import_id: int, attempt_number: int) -> None:
+    # The only writer that ends a PROCESSING import other than its attempt.
+    log.warning(
+        "import %d attempt %d ended by the startup sweep first; nothing written",
+        import_id,
+        attempt_number,
     )
 
 
@@ -249,8 +327,16 @@ def _finish(
     succeeded: bool,
     code: str | None,
     import_values: dict[str, Any],
-) -> None:
-    """Close the attempt and set the import's outcome, inside the caller's transaction."""
+) -> bool:
+    """Close the attempt and set the import's outcome, inside the caller's transaction.
+
+    Compare-and-set: only a `RUNNING` attempt of a `PROCESSING` import is
+    closed, under the locks of `_lock_live_attempt` (already held by the
+    upsert transaction; taken here by the failure writes). Returns False,
+    having changed nothing, when the startup sweep ended the import first.
+    """
+    if not _lock_live_attempt(session, import_id, attempt_id):
+        return False
     session.execute(
         update(ImportAttempt)
         .where(ImportAttempt.id == attempt_id)
@@ -269,6 +355,7 @@ def _finish(
             "completed_at": None,
         }
     session.execute(update(Import).where(Import.id == import_id).values(**outcome, **import_values))
+    return True
 
 
 def sweep_stuck_imports() -> int:
@@ -280,14 +367,16 @@ def sweep_stuck_imports() -> int:
     under the update rule of `alerts.record_failure_alerts`. Only `PROCESSING`
     imports are selected, so a `FAILED` import left without an alert by an
     earlier build is never backfilled.
+
+    A retry may still be live in another process (`oncall-agent` or the CLI)
+    when `app` restarts. The imports are failed first, then the `RUNNING`
+    attempts of exactly those imports (a later statement, so it sees an
+    attempt 2 committed with its `PROCESSING` import): the same lock order as
+    `process_attempt`. If the retry's upsert transaction holds the import row,
+    this waits, then finds it no longer `PROCESSING` and leaves it alone; if
+    this comes first, the retry finds its import ended and writes nothing.
     """
     with _session() as session, session.begin():
-        stuck = select(Import.id).where(Import.status == "PROCESSING")
-        session.execute(
-            update(ImportAttempt)
-            .where(ImportAttempt.status == "RUNNING", ImportAttempt.import_id.in_(stuck))
-            .values(status="FAILED", error_code="INTERNAL_ERROR", finished_at=func.now())
-        )
         swept = list(
             session.execute(
                 update(Import)
@@ -301,6 +390,12 @@ def sweep_stuck_imports() -> int:
                 .returning(Import.id)
             ).scalars()
         )
+        if swept:
+            session.execute(
+                update(ImportAttempt)
+                .where(ImportAttempt.status == "RUNNING", ImportAttempt.import_id.in_(swept))
+                .values(status="FAILED", error_code="INTERNAL_ERROR", finished_at=func.now())
+            )
         written = alerts.record_failure_alerts(
             session, [(import_id, alerts.SWEEP_REASON) for import_id in sorted(swept)]
         )

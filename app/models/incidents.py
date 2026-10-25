@@ -31,7 +31,7 @@ class Alert(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     import_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("imports.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
-    # Short operational reason; its wording is CIW-05's.
+    # Short, content-free reason of at most 200 characters (`_docs/operations.md` -> *Alerting*).
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     # Set by the worker's compare-and-set claim; drives the stale-claim reset.
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

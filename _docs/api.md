@@ -38,9 +38,12 @@ the two disagree, `openapi.yaml` wins and this file is fixed.
     empty headers), reported on the header's line as the only error;
   - `row` for a record that is wrong as a whole: a field count different
     from the header's, or a record the `csv` reader cannot parse
-    (an unterminated quote, a field over its size limit);
-  - `file` for the file as a whole, always on line 1: no data rows, or
-    more than 500 data rows (`file has N data rows, limit 500`).
+    (an unterminated quote, a field over its size limit). Validation stops
+    at an unparseable record, so nothing after it is reported;
+  - `file` for the file as a whole, always on line 1: an empty file or no
+    data rows (`at least one data row`), more than 500 data rows (`file has
+    N data rows, limit 500`), or bytes that are not UTF-8 (defensive only,
+    because the upload returns 400 `INVALID_ENCODING` first).
 
   The validator is `app/services/csv_validation.py` (`validate_csv`, pure,
   no database).

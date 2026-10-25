@@ -42,7 +42,11 @@ easy to violate here. Point at `AGENTS.md` rather than restating it.
 ## Evidence (filled at close)
 
 - PR: link, merged commit SHA
-- CI run: link (green)
+- CI run: link (green) on the PR's head commit. An evidence report committed
+  in the PR cannot link the run of the commit that adds it, so a criterion
+  that asks for a report links the green run of the last *code* commit; the
+  PR body and this closing comment carry the head run.
 - QA verdict: link to the PASS comment
+- PM approval: link to the APPROVED comment
 - Rubric artefacts, if the row in `_docs/rubric.md` asks for them: screenshot
   path under `_docs/evidence/`, public URL, trace id, dashboard link

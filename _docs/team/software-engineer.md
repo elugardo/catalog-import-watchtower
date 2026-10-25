@@ -31,7 +31,11 @@ groomed issue at a time, exactly as specified.
   `openapi.yaml` for contract changes, `operations.md` for a new env var,
   metric, or runbook step.
 - Commit at every green point: `Final project: <what>` with `Refs #<n>` in
-  the body. Never `Closes #<n>`.
+  the body. Never `Closes #<n>`. GitHub closes an issue for any
+  `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`
+  or `resolved` followed by `#<n>` anywhere in a PR body or commit message,
+  even in "do not close #<n>", so never write those words next to an issue
+  number (PR #43 closed #8 that way on merge). Write `Refs #<n>`.
 
 ## When you are done
 

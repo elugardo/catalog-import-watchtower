@@ -46,6 +46,17 @@ showed the same `db` and `app` containers with the same created times, and
 the `ciw_pgdata` volume was still there. Running `uv run pytest
 tests/integration` on the host twice gave the same results.
 
+**With an in-flight import (after QA's FAIL on criterion 11).** QA found that
+one test still ran the startup sweep on the shared database and turned a
+developer's `PROCESSING` import `FAILED`. After moving it to `isolated_db`, the
+same demo data plus a hand-inserted `PROCESSING` import (2531) with its
+`RUNNING` attempt gave, before run 1, after run 1 and after run 2:
+`vendors 1, products 3, imports 3, import_attempts 3, alerts 1,
+agent_actions 0`, import 2531 still `PROCESSING` with its attempt `RUNNING`
+and `finished_at` null, no alert for it, no `ciw_throwaway_*` database, and the
+same products hash. Both runs exit 0, ALL LAYERS PASSED. The inserted rows were
+deleted afterwards.
+
 Also recorded: a clean clone, after `docker compose down -v`, passed on the
 first try (about 1.5 minutes). A wrong `DATABASE_URL` for the `test` service
 gave exit code 1 with `integration FAILED 178 tests, 0 failed, 177 errors`.

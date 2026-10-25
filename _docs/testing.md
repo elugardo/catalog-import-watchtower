@@ -69,9 +69,18 @@ name that demo, fixture or QA data can hold. The `pgdata` volume is kept, so
 the demo upload and anything else in your database survive a run, and the
 command passes twice in a row with no cleanup. Code under test that touches
 rows it did not create runs on its own migrated throwaway database
-(`isolated_db`): the startup sweep tests (`test_import_sweep.py`,
-`test_alert_sweep.py`) run the app's lifespan, and the sweep fails *every*
-`PROCESSING` import in the database it is pointed at.
+(`isolated_db`). The startup sweep is such code: it fails *every*
+`PROCESSING` import in the database it is pointed at, and it runs whenever
+the app's lifespan does, that is whenever a `TestClient` is entered as a
+context manager (`with TestClient(create_app()):`). So every test that enters
+one against a real database uses `isolated_db`: the sweep tests in
+`test_import_sweep.py` and `test_alert_sweep.py`, and
+`test_failure_injection.py::test_when_the_failure_write_fails_too_the_sweep_finishes_it`.
+The `client` fixture and `make_client` return a `TestClient` that is not
+entered, so they never sweep; the one other test that enters one
+(`tests/unit/test_import_errors.py`, startup with the database down) points
+at an unreachable database. A new test that needs the lifespan uses
+`isolated_db` too.
 
 **Nothing on the host is used or modified.** The image copies the checkout
 in (`Dockerfile.test.dockerignore` leaves out `.env`, `.venv/`,

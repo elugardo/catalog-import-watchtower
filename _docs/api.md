@@ -4,8 +4,13 @@
 wrote it before any endpoint was implemented; CI validates it
 (`uv run openapi-spec-validator openapi.yaml`), and a unit test holds the
 Pydantic response models in `app/schemas/` to its property names. The
-generated-schema drift check, which compares the running app's
-`/api/openapi.json` with the YAML, lands in CIW-03.2b (#24); the frontend's
+generated-schema drift check, `tests/unit/test_openapi_drift.py` (no
+database, part of `uv run pytest tests/unit`), compares the app's
+`/api/openapi.json` with the YAML for every operation: path and method,
+parameters (name, location, `required`), response status codes, the
+property names of every response body (4xx included, `$ref` and `allOf`
+resolved) and the upload request body. The generated schema lists no 422
+and no `HTTPValidationError` (`app/main.py` removes them). The frontend's
 client types are derived from the YAML in CIW-04.1 (#5). This file holds the
 conventions and the error catalogue that the YAML alone does not explain. If
 the two disagree, `openapi.yaml` wins and this file is fixed.
@@ -49,10 +54,19 @@ the two disagree, `openapi.yaml` wins and this file is fixed.
   no database).
 - The four list endpoints (`GET /api/imports`, `/api/vendors`,
   `/api/products`, `/api/alerts`) return `{ "items": [...], "total": n }`,
-  both required, newest first, with `limit` (default 50, min 1, max 100) and
-  `offset` (default 0, min 0); a malformed or out-of-range value is 400
-  `INVALID_QUERY`. Only the products list pages in the UI; on the others the
-  parameters just bound the response.
+  both required, newest first (imports, vendors and alerts by `created_at`,
+  products by `updated_at`), ties by `id` descending, with `limit` (default
+  50, min 1, max 100) and `offset` (default 0, min 0); a malformed or
+  out-of-range value is 400 `INVALID_QUERY` (see *Errors: never 422*).
+  `total` counts every row under the same filter and ignores `limit` and
+  `offset`. An `offset` at or past `total`, however large (even beyond the
+  `BIGINT` range), is an empty page with the true `total`, never an error.
+  `GET /api/products?vendor_id=` takes an integer; an unknown, zero,
+  negative or out-of-range `vendor_id` is `{ "items": [], "total": 0 }`,
+  never 404. Unknown query parameters are ignored. Only the products list
+  pages in the UI (**Load more**: request with `offset` = the items received
+  so far until that equals `total`); on the others the parameters just
+  bound the response. The queries are `app/services/lists.py`.
 - Timestamps are ISO-8601 UTC with `Z`. Money is `price_cents` (integer);
   the frontend formats dollars. No response carries `csv_bytes`, a
   `normalized_*` column or a price in dollars.
@@ -78,8 +92,19 @@ No request ever answers 422 (CIW-03.2a, #4). FastAPI's
   `GET /api/imports/{id}` that is not an integer of at least 1 (`abc`, `0`,
   `-1`, `1.5`) names no import, and that route's contract has only 200 and
   404. An id beyond the `BIGINT` range is also 404;
-- anything else is 400 `INVALID_FIELD` (query parameters become 400
-  `INVALID_QUERY` with the list endpoints, #24).
+- a malformed or out-of-range query parameter (`limit`, `offset`,
+  `vendor_id`) is **400 `INVALID_QUERY`**, with a `message` that names the
+  parameter and every finding in `details`. A query integer is an optional
+  `-` followed by ASCII digits `0-9` only (`app/schemas/query.py`): `5.0`,
+  `+5`, ` 5` (a leading space), `1e2`, `1_0` and the empty value are
+  malformed; leading zeros are allowed (`limit=05` is `limit=5`). Range
+  checks come after the grammar (`limit` 1 to 100, `offset` at least 0);
+- anything else is 400 `INVALID_FIELD`.
+
+Other methods on the list routes (`POST`, `PUT`, `DELETE`) are 405
+`METHOD_NOT_ALLOWED` in the same error shape. A list request while the
+database is unreachable is 500 `INTERNAL_ERROR` with a generic message (no
+host, user or DSN); `/api/health` then reports `degraded`.
 
 `POST /api/imports` parses its multipart form itself, so its field errors
 never reach that handler: a field that is absent is 400 `MISSING_FIELD`; a
@@ -150,7 +175,8 @@ Import `failure_code` (persisted, drives the agent policy):
 
 HTTP error `code` values: `MISSING_FIELD`, `INVALID_FIELD`,
 `INVALID_CONTENT_TYPE`, `INVALID_ENCODING`, `FILE_TOO_LARGE`,
-`INVALID_QUERY`, `NOT_FOUND`, `INTERNAL_ERROR`.
+`INVALID_QUERY`, `NOT_FOUND`, `METHOD_NOT_ALLOWED` (405, a method a route
+does not take), `INTERNAL_ERROR`.
 
 Validation messages are short, name the rule, and may quote the offending
 value, because they are shown only to the operator in the UI. The agent's

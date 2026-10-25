@@ -1,9 +1,4 @@
-"""`GET /api/health` response (`openapi.yaml` -> `Health`).
-
-`app/routers/health.py` still declares its own identical model from CIW-01;
-`tests/unit/test_contract_schemas.py` holds both to the YAML until CIW-03.2
-(#4) wires the routers to `app.schemas`.
-"""
+"""`GET /api/health` response (`openapi.yaml` -> `Health`), served by `app/routers/health.py`."""
 
 from typing import Literal
 

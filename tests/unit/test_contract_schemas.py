@@ -2,8 +2,9 @@
 
 For every schema of the contract, the model's serialised property names, its
 required set and its nullable fields equal the YAML's, and every enum agrees
-with the persisted values in `app.models.enums`. The route-level drift test
-against the running app is CIW-03.2's (#4).
+with the persisted values in `app.models.enums`. Response models are imported
+only from `app.schemas`, which every router uses. The route-level drift test
+against the generated schema of the app is `test_openapi_drift.py`.
 """
 
 from datetime import UTC, datetime, timedelta, timezone
@@ -13,7 +14,6 @@ import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from app.models import enums
-from app.routers.health import HealthResponse
 from app.schemas import (
     AgentActionOut,
     AlertListItemOut,
@@ -133,17 +133,17 @@ def test_enums_agree_between_yaml_models_and_schemas(name, components):
     assert get_args(literal) == persisted
 
 
-def test_router_health_model_matches_the_contract_until_4_switches_to_app_schemas(
-    openapi, components
-):
-    yaml_properties, yaml_required = _flatten(components["Health"], openapi)
-    schema = HealthResponse.model_json_schema(mode="serialization")
-
-    assert set(schema["properties"]) == set(yaml_properties)
-    assert set(schema["required"]) == yaml_required
+def test_health_enums_match_the_contract(openapi, components):
+    yaml_properties, _ = _flatten(components["Health"], openapi)
     for key in ("status", "db"):
-        assert schema["properties"][key]["enum"] == yaml_properties[key]["enum"]
         assert _model_schema(HealthOut)["properties"][key]["enum"] == yaml_properties[key]["enum"]
+
+
+def test_the_health_route_serves_the_app_schemas_model():
+    from app.routers.health import get_health, router
+
+    (route,) = [r for r in router.routes if getattr(r, "endpoint", None) is get_health]
+    assert route.response_model is HealthOut
 
 
 def test_validation_error_line_starts_at_one():

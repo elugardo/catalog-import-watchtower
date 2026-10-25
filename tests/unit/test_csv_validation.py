@@ -328,6 +328,21 @@ def test_invalid_header_is_one_error_naming_every_offending_header(header, expec
         assert text in error["message"].casefold()
 
 
+@pytest.mark.parametrize("lookalike", ["ſku", "sKU"], ids=["long-s", "kelvin-sign"])
+def test_non_ascii_lookalike_header_does_not_match(lookalike):
+    result = run(csv_text(f"{lookalike},name,price,quantity", ROW_1))
+    error = only_error(result)
+    assert error["column"] == "header"
+    assert "missing sku" in error["message"]
+
+
+def test_case_variants_of_an_unexpected_header_are_named_once():
+    result = run(csv_text("sku,name,price,quantity,foo,Foo", ROW_1 + ",a,b"))
+    message = only_error(result)["message"]
+    assert message.count("'foo'") == 2  # once as unexpected, once as duplicate
+    assert "'Foo'" not in message
+
+
 def test_invalid_header_takes_precedence_over_the_row_limit():
     result = run(csv_text("sku,name,price", *["CHAIR-001,Oak,1"] * 501))
     assert where(result) == [(1, "header")]

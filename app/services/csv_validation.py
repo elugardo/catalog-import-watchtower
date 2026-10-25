@@ -39,7 +39,7 @@ REQUIRED_HEADERS = ("sku", "name", "price", "quantity")
 _UTF8_BOM = b"\xef\xbb\xbf"
 # Explicit ASCII classes: `\d` would also accept Arabic-Indic and other digits.
 _SKU_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
-_PRICE_RE = re.compile(r"([0-9]{1,10})(?:\.([0-9]{1,2}))?")
+_PRICE_RE = re.compile(r"[0-9]{1,10}(?:\.[0-9]{1,2})?")
 _QUANTITY_RE = re.compile(r"[0-9]{1,9}")
 
 
@@ -117,7 +117,7 @@ def validate_csv(data: bytes) -> CsvValidationResult:
     if header_problem is not None:
         return _failure([_error(header.line, "header", header_problem)], row_count)
     assert header.fields is not None  # a header that failed to parse has a problem
-    columns = [cell.strip().casefold() for cell in header.fields]
+    columns = [_header_key(cell) for cell in header.fields]
 
     if row_count == 0:
         return _failure([_no_data_rows()], row_count)
@@ -149,30 +149,35 @@ def _read_records(text: str) -> list[_Record]:
             records.append(_Record(start, fields))
 
 
+def _header_key(cell: str) -> str:
+    """Trimmed, case-insensitive header name; ASCII only, so `ſku` or a Kelvin sign never match `sku`."""
+    name = cell.strip()
+    return name.lower() if name.isascii() else name
+
+
 def _header_problem(header: _Record) -> str | None:
     if header.fields is None:
         return f"invalid header: {header.problem}"
     seen: dict[str, int] = {}
-    unexpected: list[str] = []
+    unexpected: dict[str, str] = {}  # key -> first spelling seen
     empty_positions: list[int] = []
     for position, cell in enumerate(header.fields, start=1):
         name = cell.strip()
-        key = name.casefold()
+        key = _header_key(cell)
         if not name:
             empty_positions.append(position)
         elif key not in REQUIRED_HEADERS:
-            unexpected.append(name)
+            unexpected.setdefault(key, name)
         seen[key] = seen.get(key, 0) + 1
     missing = [name for name in REQUIRED_HEADERS if name not in seen]
     duplicate = [name for name in REQUIRED_HEADERS if seen.get(name, 0) > 1]
-    duplicate += [name for name in dict.fromkeys(unexpected) if seen[name.casefold()] > 1]
-    unexpected = list(dict.fromkeys(unexpected))
+    duplicate += [name for key, name in unexpected.items() if seen[key] > 1]
 
     parts = []
     if missing:
         parts.append("missing " + ", ".join(missing))
     if unexpected:
-        parts.append("unexpected " + ", ".join(_quote(name) for name in unexpected))
+        parts.append("unexpected " + ", ".join(_quote(name) for name in unexpected.values()))
     if duplicate:
         parts.append("duplicate " + ", ".join(_quote(name) for name in duplicate))
     if empty_positions:
@@ -301,9 +306,7 @@ def _duplicate_problem(sku: str, line: int, lines_by_sku: dict[str, list[int]]) 
 
 def _price_cents(value: str) -> int:
     """Integer cents from a value that matched `_PRICE_RE`; no floating point."""
-    match = _PRICE_RE.fullmatch(value)
-    assert match is not None
-    whole, fraction = match.group(1), match.group(2) or ""
+    whole, _, fraction = value.partition(".")
     return int(whole) * 100 + int(fraction.ljust(2, "0"))
 
 

@@ -8,7 +8,9 @@
   transaction. Any exception in that transaction rolls it back and the import
   ends `FAILED` / `INTERNAL_ERROR` (CIW-05 adds the transient code and alerts).
 - `sweep_stuck_imports` is the startup crash recovery (step 5).
-- `load_import_detail` is the read side of `GET /api/imports/{id}`.
+- `load_import_detail` is the read side of `GET /api/imports/{id}`;
+  `import_summary` builds the `Import` fields it shares with `GET /api/imports`
+  (`app/services/lists.py`).
 
 Logs carry only ids, counts and codes, never catalog content (AGENTS.md ->
 Rules); exceptions are logged by type, because a driver message can quote the
@@ -260,26 +262,37 @@ def load_import_detail(import_id: int) -> ImportDetailOut | None:
                     .order_by(AgentAction.created_at, AgentAction.id)
                 ).scalars()
             )
-        attempts = record.attempts
         return ImportDetailOut.model_validate(
             {
-                "id": record.id,
-                "vendor": record.vendor,
-                "filename": record.filename,
-                "sha256": record.sha256,
-                "row_count": record.row_count,
-                "product_count": record.product_count,
-                "status": record.status,
-                "failure_code": record.failure_code,
-                "validation_errors": record.validation_errors_json,
-                "validation_error_count": record.validation_error_count,
-                "inject_transient_failure": record.inject_transient_failure,
-                "attempt_count": len(attempts),
-                "recovered": record.status == "COMPLETED" and len(attempts) > 1,
-                "created_at": record.created_at,
-                "completed_at": record.completed_at,
-                "attempts": attempts,
+                **import_summary(record),
+                "attempts": record.attempts,
                 "alert": alert,
                 "agent_actions": actions,
             }
         )
+
+
+def import_summary(record: Import) -> dict[str, Any]:
+    """The fields of `openapi.yaml` -> `Import`, shared by the detail and `GET /api/imports`.
+
+    `attempt_count` and `recovered` are derived here on every read, never stored.
+    Reads `record.vendor` and `record.attempts`, so the session must still be open.
+    """
+    attempt_count = len(record.attempts)
+    return {
+        "id": record.id,
+        "vendor": record.vendor,
+        "filename": record.filename,
+        "sha256": record.sha256,
+        "row_count": record.row_count,
+        "product_count": record.product_count,
+        "status": record.status,
+        "failure_code": record.failure_code,
+        "validation_errors": record.validation_errors_json,
+        "validation_error_count": record.validation_error_count,
+        "inject_transient_failure": record.inject_transient_failure,
+        "attempt_count": attempt_count,
+        "recovered": record.status == "COMPLETED" and attempt_count > 1,
+        "created_at": record.created_at,
+        "completed_at": record.completed_at,
+    }

@@ -4,13 +4,15 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.routers import health, imports
+from app.routers import alerts, health, imports, products, vendors
+from app.schemas.query import QUERY_RULES
 from app.schemas.upload import UploadRejected
 from app.services.importer import sweep_stuck_imports
 from app.settings import get_settings
@@ -29,6 +31,9 @@ _STATUS_CODES = {
     413: "FILE_TOO_LARGE",
     500: "INTERNAL_ERROR",
 }
+
+# FastAPI's own components for the 422 body; removed with the 422 itself.
+_FASTAPI_VALIDATION_SCHEMAS = ("HTTPValidationError", "ValidationError")
 
 
 @asynccontextmanager
@@ -66,8 +71,28 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.include_router(health.router, prefix=API_PREFIX)
-    app.include_router(imports.router, prefix=API_PREFIX)
+    for module in (health, imports, vendors, products, alerts):
+        app.include_router(module.router, prefix=API_PREFIX)
+
+    def openapi_without_422() -> dict[str, Any]:
+        """The generated schema, minus the 422 FastAPI lists on every route with parameters.
+
+        No request ever answers 422 (`_docs/api.md` -> *Errors*), so the schema
+        served at `/api/openapi.json` must not promise one;
+        `tests/unit/test_openapi_drift.py` holds it to `openapi.yaml`.
+        """
+        if app.openapi_schema is None:
+            schema = generate_openapi()  # FastAPI's own; caches into app.openapi_schema
+            for path_item in schema.get("paths", {}).values():
+                for operation in path_item.values():
+                    operation.get("responses", {}).pop("422", None)
+            components = schema.get("components", {}).get("schemas", {})
+            for name in _FASTAPI_VALIDATION_SCHEMAS:
+                components.pop(name, None)
+        return app.openapi_schema
+
+    generate_openapi = app.openapi
+    app.openapi = openapi_without_422  # type: ignore[method-assign]
 
     @app.exception_handler(UploadRejected)
     async def upload_rejected_handler(request: Request, exc: UploadRejected) -> Response:
@@ -91,6 +116,8 @@ def create_app() -> FastAPI:
         # No request ever ends in 422 (`_docs/api.md` -> *Errors*). A malformed
         # path parameter (an import id that is not an integer >= 1) names no
         # resource, so it is a 404; anything else is a 400.
+        # A malformed or out-of-range query parameter is 400 `INVALID_QUERY`,
+        # with a message naming the parameter (`app/schemas/query.py`).
         errors = exc.errors()
         if any(error.get("loc", ())[:1] == ("path",) for error in errors):
             return error_response(404, "NOT_FOUND", "no such resource")
@@ -98,6 +125,17 @@ def create_app() -> FastAPI:
             {"loc": [str(part) for part in error.get("loc", ())], "message": str(error.get("msg"))}
             for error in errors
         ]
+        name = next(
+            (
+                str(error["loc"][1])
+                for error in errors
+                if error.get("loc", ())[:1] == ("query",) and len(error["loc"]) > 1
+            ),
+            None,
+        )
+        if name is not None:
+            message = QUERY_RULES.get(name, f"query parameter {name} is invalid")
+            return error_response(400, "INVALID_QUERY", message, details)
         return error_response(400, "INVALID_FIELD", "request validation failed", details)
 
     @app.exception_handler(Exception)

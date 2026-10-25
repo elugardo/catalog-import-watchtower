@@ -7,7 +7,8 @@ outer transaction that is rolled back afterwards, so the suite leaves no rows
 behind and can run twice in a row. Tests of the import API commit real
 transactions from several connections, so they use `ns` instead: unique
 vendor names whose rows are deleted at teardown. Destructive migration steps only ever run
-in a throwaway database (`test_migration_round_trip.py`).
+in a throwaway database (`throwaway_url`, used by `test_migration_round_trip.py` and
+the empty-database list test).
 """
 
 import os
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, make_url, text
 from sqlalchemy.orm import Session
 
 from app.settings import Settings
@@ -58,6 +59,25 @@ def migrated_engine(database_url) -> Iterator[Engine]:
     engine = create_engine(database_url)
     yield engine
     engine.dispose()
+
+
+@pytest.fixture
+def throwaway_url(database_url) -> Iterator[str]:
+    """A new, empty database on the same server (no migration run), dropped afterwards.
+
+    For what must never touch the shared `db`: destructive migration steps,
+    and the lists on a database with no rows at all.
+    """
+    name = f"ciw_throwaway_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    try:
+        yield make_url(database_url).set(database=name).render_as_string(hide_password=False)
+    finally:
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()
 
 
 @pytest.fixture

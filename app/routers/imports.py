@@ -1,6 +1,9 @@
-"""`POST /api/imports` and `GET /api/imports/{id}` (spec section 4 F1 to F3, section 7).
+"""`POST /api/imports`, `GET /api/imports` and `GET /api/imports/{id}` (spec section 4 F1
+to F3, section 7).
 
-The list endpoint `GET /api/imports` is CIW-03.2b (#24).
+No route here answers 422: the upload parses its own form, a bad query value is
+400 `INVALID_QUERY` and a bad id is 404 (`app.main`), and the 422 FastAPI would
+list in the generated schema is removed there too.
 """
 
 from typing import Annotated
@@ -10,7 +13,8 @@ from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartException
 
-from app.schemas import ErrorOut, ImportDetailOut
+from app.schemas import ErrorOut, ImportDetailOut, ImportOut, Page
+from app.schemas.query import DEFAULT_LIMIT, MAX_BIGINT, Limit, Offset
 from app.schemas.upload import (
     MAX_UPLOAD_BYTES,
     UploadRequest,
@@ -22,12 +26,9 @@ from app.schemas.upload import (
     missing,
     parse_injection_flag,
 )
-from app.services import importer
+from app.services import importer, lists
 
 router = APIRouter(tags=["imports"])
-
-# The largest BIGINT; a larger id cannot exist and is a 404, not a database error.
-_MAX_ID = 2**63 - 1
 
 # The request body as `openapi.yaml` describes it. The handler parses the form
 # itself (so that no request ever ends in FastAPI's 422), which means FastAPI
@@ -127,6 +128,17 @@ def create_import(upload: Annotated[UploadRequest, Depends(read_upload)]) -> Imp
 
 
 @router.get(
+    "/imports",
+    response_model=Page[ImportOut],
+    summary="Recent imports, newest first",
+    responses={400: {"model": ErrorOut}},
+)
+def list_imports(limit: Limit = DEFAULT_LIMIT, offset: Offset = 0) -> Page[ImportOut]:
+    """The import resource without `attempts`, `alert` and `agent_actions`."""
+    return lists.list_imports(limit, offset)
+
+
+@router.get(
     "/imports/{id}",
     response_model=ImportDetailOut,
     summary="One import with its errors, attempts, alert and agent activity",
@@ -134,7 +146,8 @@ def create_import(upload: Annotated[UploadRequest, Depends(read_upload)]) -> Imp
 )
 def get_import(id: Annotated[int, Path(ge=1)]) -> ImportDetailOut:  # the contract names it `id`
     import_id = id
-    detail = importer.load_import_detail(import_id) if import_id <= _MAX_ID else None
+    # A larger id cannot exist and is a 404, not a database error.
+    detail = importer.load_import_detail(import_id) if import_id <= MAX_BIGINT else None
     if detail is None:
         raise HTTPException(
             status_code=404,

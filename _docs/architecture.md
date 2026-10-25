@@ -56,6 +56,7 @@ app/
     csv_validation.py  pure: bytes → (rows | errors); no DB
     importer.py        transaction: validate, inject, upsert, attempts, status; startup sweep; import detail
     vendors.py         vendor find-or-create (ON CONFLICT DO NOTHING + select)
+    lists.py           read-only: the four list queries (newest first, id DESC ties, LIMIT/OFFSET, count)
     alerts.py          create / claim / transition alerts, stale-claim reset
     agent_tools.py     the six guarded tool functions, each writes its audit row
   routers/             imports, vendors, products, alerts, health

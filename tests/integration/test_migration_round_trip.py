@@ -6,26 +6,9 @@ the Compose `db` is never touched. CI runs the same sequence against its
 service database as separate steps of the `backend` job.
 """
 
-import uuid
-
-import pytest
-from sqlalchemy import create_engine, make_url, text
+from sqlalchemy import create_engine, text
 
 from tests.integration.conftest import run_alembic
-
-
-@pytest.fixture
-def throwaway_url(database_url):
-    name = f"ciw_roundtrip_{uuid.uuid4().hex[:12]}"
-    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        connection.execute(text(f'CREATE DATABASE "{name}"'))
-    try:
-        yield make_url(database_url).set(database=name).render_as_string(hide_password=False)
-    finally:
-        with admin.connect() as connection:
-            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
-        admin.dispose()
 
 
 def _public_tables(url: str) -> set[str]:

@@ -9,13 +9,14 @@ else, and records what it did.
 
 Final project for the AI Dev Tools Zoomcamp 2026 (the course work lives in [`elugardo/ai-dev-tools-zoomcamp`](https://github.com/elugardo/ai-dev-tools-zoomcamp)).
 
-**Status: spec final, backlog being published.** The agent team and the
-process are in place and the specification was signed off on 2026-10-24;
-the backlog is being published as GitHub issues and application code starts
-with issue CIW-01. This README is
-rewritten by issue CIW-11 into the reviewer walkthrough (problem,
-architecture, quick start, tests, deployment, observability, AI workflow,
-limitations).
+**Status: spec final, backlog published, ten issues closed through the
+agent loop.** The backlog is public as GitHub issues labelled
+`final-project`, and ten of them (#1 to #8, #24, #40) have run groom,
+implement, QA, PM approval, merge and close, as recorded in
+[`_docs/evidence/2026-10-25-agent-workflow/report.md`](_docs/evidence/2026-10-25-agent-workflow/report.md).
+This README is rewritten by #16 (CIW-11) into the reviewer walkthrough
+(problem, architecture, quick start, tests, deployment, observability, AI
+workflow, limitations).
 
 - Specification: [`_docs/spec.md`](_docs/spec.md)
 - How work is organized: [`AGENTS.md`](AGENTS.md) and

@@ -25,11 +25,12 @@ repository root.
 | Implementing an issue | [`_docs/team/software-engineer.md`](_docs/team/software-engineer.md) |
 | Verifying an issue | [`_docs/team/qa-engineer.md`](_docs/team/qa-engineer.md) |
 | Touching models, services, Compose, or the folder layout | [`_docs/architecture.md`](_docs/architecture.md) |
-| Touching an endpoint, a request/response shape, or an error code | [`_docs/api.md`](_docs/api.md), then `openapi.yaml` (the contract, from issue 02 on) |
+| Running the loop as the orchestrator (groom, implement, QA, PM approval, merge, close) | [`.claude/skills/work-issue/SKILL.md`](.claude/skills/work-issue/SKILL.md) and the agent definitions in [`.claude/agents/`](.claude/agents/), with [`_docs/process.md`](_docs/process.md) |
+| Touching an endpoint, a request/response shape, or an error code | [`_docs/api.md`](_docs/api.md), then [`openapi.yaml`](openapi.yaml) (the contract) |
 | Writing or reviewing tests | [`_docs/testing.md`](_docs/testing.md) |
 | Telemetry, alerts, env vars, deployment, rollback, the real-LLM demo | [`_docs/operations.md`](_docs/operations.md) |
 | Working on the runtime on-call worker, or triaging an incident by hand | [`_docs/team/oncall-agent.md`](_docs/team/oncall-agent.md) and [`.agents/skills/incident-response/SKILL.md`](.agents/skills/incident-response/SKILL.md) |
-| Checking that a deliverable earns its points | [`_docs/rubric.md`](_docs/rubric.md) |
+| Checking that a deliverable earns its points | [`_docs/rubric.md`](_docs/rubric.md), and the reports in [`_docs/evidence/`](_docs/evidence/) that back each row ([`README.md`](_docs/evidence/README.md) says what a report holds) |
 | Making a decision that is hard to reverse (provider, repo layout, schema, auth between services) | write an ADR in [`_docs/adr/`](_docs/adr/) first |
 
 ## Layout
@@ -50,7 +51,7 @@ lands; whoever creates one updates this section in the same PR.
 ├── Dockerfile, .dockerignore   multi-stage: node builds web/, then the Python image serving SPA + API; APP_VERSION build arg
 ├── .env.example           every variable, no secrets
 ├── pyproject.toml, uv.lock, .python-version   one package for app and worker; `[tool.uv] package = false`
-├── alembic.ini, alembic/  migrations; env.py reads DATABASE_URL from app.settings and imports app.models; versions/ holds the first revision (the six tables, issue 02); later revisions are additive-only
+├── alembic.ini, alembic/  migrations; env.py reads DATABASE_URL from app.settings and imports app.models; versions/ holds the first revision (the six tables); later revisions are additive-only
 ├── app/                   FastAPI package: main.py, settings.py, db.py (engine, Base with the constraint naming convention), main.py also maps every error to the one shape (never 422) and runs the startup sweep, and strips the 422 from the generated schema; routers/ (health.py; imports.py: POST /api/imports, GET /api/imports and GET /api/imports/{id}; vendors.py, products.py, alerts.py: the other three lists); schemas/ (response models; upload.py: the no-parse upload checks; query.py: the list query parameters and their integer grammar); app/services/ is the service layer (csv_validation.py: pure bytes -> rows | errors; importer.py: create_import, run_attempt(import_id, attempt_number), the startup sweep, the import detail and the shared import summary; vendors.py: vendor find-or-create; lists.py: the read-only list queries); app/oncall/ is the worker (idle stub; loop in issue 08); app/static/ is the built SPA (git-ignored)
 │   ├── models/            SQLAlchemy models of the six tables (catalog.py, imports.py, incidents.py) and enums.py (the CHECK values)
 │   └── schemas/           Pydantic v2 response models mirroring openapi.yaml (a unit test keeps them in step)
@@ -95,8 +96,15 @@ Short, because the spec is long. Each rule here is one that is easy to break
 while looking right.
 
 - **No issue, no work.** Every change belongs to an open GitHub issue with
-  acceptance criteria. Reference it as `Refs #N` in commits; never `Closes #N`
-  (closing happens after QA, see `_docs/process.md`).
+  acceptance criteria. Reference it as `Refs #N` in commits **and in PR
+  bodies**. Never write a closing keyword (`close`, `closes`, `closed`,
+  `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`) next to an
+  issue number in a commit, a PR title or a PR body, not even negated:
+  GitHub closes the issue at merge. The orchestrator closes a backlog issue
+  after QA PASS **and** PM approval, and a docs follow-up by hand once the
+  docs-only PR that settles it merges; the PM closes a QA follow-up it folds
+  or rules not planned, right after its ruling comment (`_docs/process.md`
+  step 10).
 - **Scope is `_docs/spec.md`.** Section 3 lists the non-goals; they stay out.
   If the spec is wrong or silent, stop and say so; the PM changes the spec, then
   the issue, then the code.

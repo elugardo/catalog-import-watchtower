@@ -16,6 +16,10 @@ do not groom, implement or test yourself. The argument is the issue number.
 2. **Groom.** If the body is not in the five sections of
    `_docs/issue-template.md`, or has no groom comment, launch the
    `product-manager` agent with "Groom issue #<n>". Never skip this check.
+   If the groom decided a change under `_docs/`, have the
+   `product-manager` agent land it as a docs-only PR and merge that on
+   green CI now, before step 3, so the spec changes before the code
+   (`_docs/process.md` -> *Docs-only PRs*).
 3. **Implement.** Launch the `software-engineer` agent with "Implement issue
    #<n>". Wait for its report: branch, PR, test result.
 4. **Verify.** Launch the `qa-engineer` agent, fresh, with "Test issue #<n>,
@@ -35,7 +39,14 @@ do not groom, implement or test yourself. The argument is the issue number.
 8. **Close with evidence.** Post the closing comment with the evidence listed
    in `_docs/issue-template.md` → *Evidence* (merged PR and commit SHA, CI
    run, QA comment, PM approval, rubric artefacts), then `gh issue close <n>`.
-   Pull `main` locally so the next branch starts from the merge.
+   Pull `main` locally so the next branch starts from the merge. If the
+   approval decided a change under `_docs/`, launch the `product-manager`
+   agent to land it as a docs-only PR and merge that on green CI before
+   any code depends on it (`_docs/process.md` -> *Docs-only PRs*, the one
+   PR that merges without PASS and APPROVED). Close a QA follow-up that such
+   a PR settles the same way, by hand, with a comment linking the merged
+   PR. A follow-up the PM folded or ruled not planned is already closed by
+   the PM.
 9. **Continue.** Tell Marcos in one short paragraph what was merged and the
    links, then pick the lowest-numbered open issue whose dependencies in
    `_docs/backlog.md` are all closed and start again at step 1. Stop only

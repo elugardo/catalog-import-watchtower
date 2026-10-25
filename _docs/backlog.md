@@ -23,7 +23,7 @@ file is only the map from spec id to issue number and the dependency order.
 | 05.1 | Keep SQL bound parameters and catalog content out of error logs | §10 (privacy); AGENTS.md -> Rules | 05 | P0 | [#40](https://github.com/elugardo/catalog-import-watchtower/issues/40) | `fp-40-log-privacy` |
 | 06 | Add the single test command, scenario coverage and frontend tests | §9 | 03.2b, 04.2, 05, 05.1 | P0 | [#8](https://github.com/elugardo/catalog-import-watchtower/issues/8) | `fp-8-tests` |
 | 06.1 | Declare the 500 INTERNAL_ERROR on POST /api/imports and GET /api/imports/{id} | §7 | 06 | P1 | [#44](https://github.com/elugardo/catalog-import-watchtower/issues/44) | `fp-44-contract-500` |
-| 07 | Create agent team docs + issue workflow evidence | §12 | — (the docs exist; closes after the first full cycle) | P0 | [#9](https://github.com/elugardo/catalog-import-watchtower/issues/9) | `fp-9-team-docs` |
+| 07 | Create agent team docs + issue workflow evidence | §12 | — (the docs existed; stayed open while the first ten cycles ran, then ran after 06 (#8); its evidence is those cycles, in [`evidence/2026-10-25-agent-workflow/report.md`](evidence/2026-10-25-agent-workflow/report.md)) | P0 | [#9](https://github.com/elugardo/catalog-import-watchtower/issues/9) | `fp-9-team-docs` |
 | 08.1 | Add the six guarded agent tools, audit rows and maintenance CLI | §4 F5 (tools); §7 (retry idempotency); §9 scenario 5 | 05, 06 | P1 | [#10](https://github.com/elugardo/catalog-import-watchtower/issues/10) | `fp-10-agent-tools` |
 | 08.2 | Add the LLM on-call worker loop and the real-LLM recovery evidence | §4 F5 (agent); §9 scenarios 4–5 | 08.1 | P1 | [#11](https://github.com/elugardo/catalog-import-watchtower/issues/11) | `fp-11-oncall-agent` |
 | 09.1 | Instrument the import and agent flows with OpenTelemetry | §10 (instrumentation) | 05, 08.2 | P1 | [#12](https://github.com/elugardo/catalog-import-watchtower/issues/12) | `fp-12-otel-instrumentation` |
@@ -35,9 +35,15 @@ file is only the map from spec id to issue number and the dependency order.
 ## Order
 
 01 → 02 → 03.1 → 03.2a → 03.2b → 04.1 → 04.2 → 05 → 05.1 → 06, then 08.1 → 08.2, then
-09.1 → 09.2, then 10.1 → 10.2, then 06.1, then 11. 07 is open from the start and closes
-as soon as the first groom → implement → QA → merge cycle has run (expected
-right after #1), since its evidence *is* that cycle. #24 (03.2b) runs right after #4 (03.2a)
+09.1 → 09.2, then 10.1 → 10.2, then 06.1, then 11. 07 (#9) was open from the start
+and was meant to close right after the first cycle (#1); instead it stayed
+open while ten cycles ran (#1, #2, #3, #4, #24, #5, #6, #7, #40, #8) and
+ran after #8. It has no dependency, so from the close of #4 on it was the
+lowest unblocked number and the rule would have picked it ahead of #24,
+#5, #6, #7, #40 and #8; the orchestrator states this was its oversight,
+following the spec-order chain above instead (the report's *Deviations* records this). Its
+evidence is those ten cycles, in
+[`evidence/2026-10-25-agent-workflow/report.md`](evidence/2026-10-25-agent-workflow/report.md). #24 (03.2b) runs right after #4 (03.2a)
 even though #5 has a lower number, because #5 depends on #24. #40 (05.1)
 runs right after #7 (05) even though #8 has a lower number, because #8
 depends on #40. #44 (06.1) has the highest number, so the lowest-number rule

@@ -35,7 +35,7 @@ groomed issue at a time, exactly as specified.
   `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`
   or `resolved` followed by `#<n>` anywhere in a PR body or commit message,
   even in "do not close #<n>", so never write those words next to an issue
-  number (PR #43 closed #8 that way on merge). Write `Refs #<n>`.
+  number (that is how #8 was shut early by the merge of PR #43). Write `Refs #<n>`.
 
 ## When you are done
 
@@ -46,8 +46,10 @@ groomed issue at a time, exactly as specified.
   at first. Link the issue.
 - Comment on the issue with what you built, what you verified and how, what
   you did not do and why, and the PR link.
-- **Do not close the issue.** Closing happens after QA returns PASS and the
-  PR is merged.
+- **Do not close or merge.** The orchestrator merges the PR and closes the
+  issue, after QA PASS, PM APPROVED and green CI, once its evidence comment
+  is posted (`_docs/process.md`, steps 9 and 10).
 
-If QA returns FAIL, treat the QA comment as the new input: fix on the same
-branch, re-run the tests, update the PR, comment again.
+If QA returns FAIL or the PM returns CHANGES REQUESTED, treat that comment
+as the new input in the same way: fix on the same branch, re-run the tests,
+update the PR, comment again. The loop goes back to QA either way.

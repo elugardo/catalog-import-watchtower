@@ -1,8 +1,9 @@
 # API
 
 `openapi.yaml` at the project root is the contract (OpenAPI 3.1). Issue 02
-wrote it before any endpoint was implemented; CI validates it
-(`uv run openapi-spec-validator openapi.yaml`), and a unit test holds the
+wrote it before any endpoint was implemented; the one test command
+(`_docs/testing.md`) validates it on every PR through
+`tests/unit/test_openapi_contract.py` (`openapi-spec-validator`), and a unit test holds the
 Pydantic response models in `app/schemas/` to its property names. The
 generated-schema drift check, `tests/unit/test_openapi_drift.py` (no
 database, part of `uv run pytest tests/unit`), compares the app's
@@ -14,9 +15,9 @@ body. The generated schema lists no 422
 and no `HTTPValidationError` (`app/main.py` removes them). The frontend's
 client types are generated from the YAML by `npm --prefix web run gen:api`
 (`openapi-typescript`) into the committed `web/src/api/schema.d.ts`, which
-`web/src/api/client.ts` uses; CI's `frontend` job runs
-`npm run check:api`, which regenerates them and fails when they differ from
-the committed file (CIW-04.1, #5). This file holds the
+`web/src/api/client.ts` uses; the one test command runs
+`npm --prefix web run check:api`, which regenerates them and fails when they differ from
+the committed file (CIW-04.1, #5; in the command since CIW-06, #8). This file holds the
 conventions and the error catalogue that the YAML alone does not explain. If
 the two disagree, `openapi.yaml` wins and this file is fixed.
 

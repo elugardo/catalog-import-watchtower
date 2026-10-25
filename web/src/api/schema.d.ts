@@ -120,9 +120,9 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description The one error shape of every 4xx response. */
+        /** @description The one error shape of every 4xx and 5xx response. */
         Error: {
-            /** @description Stable, upper snake case: MISSING_FIELD, INVALID_FIELD, INVALID_CONTENT_TYPE, INVALID_ENCODING, FILE_TOO_LARGE, INVALID_QUERY, NOT_FOUND, INTERNAL_ERROR. */
+            /** @description Stable, upper snake case: MISSING_FIELD, INVALID_FIELD, INVALID_CONTENT_TYPE, INVALID_ENCODING, FILE_TOO_LARGE, INVALID_QUERY, NOT_FOUND, METHOD_NOT_ALLOWED, INTERNAL_ERROR. */
             code: string;
             message: string;
             details: Record<string, never>[];
@@ -324,6 +324,22 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description `INTERNAL_ERROR`: an unexpected failure, for example the database is unreachable; the message is generic. */
+        InternalError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "code": "INTERNAL_ERROR",
+                 *       "message": "internal error",
+                 *       "details": []
+                 *     }
+                 */
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         /** @description Page size. */
@@ -361,6 +377,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidQuery"];
+            500: components["responses"]["InternalError"];
         };
     };
     createImport: {
@@ -488,6 +505,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidQuery"];
+            500: components["responses"]["InternalError"];
         };
     };
     listProducts: {
@@ -516,6 +534,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidQuery"];
+            500: components["responses"]["InternalError"];
         };
     };
     listAlerts: {
@@ -542,6 +561,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidQuery"];
+            500: components["responses"]["InternalError"];
         };
     };
     getHealth: {

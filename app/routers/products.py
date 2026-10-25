@@ -17,7 +17,7 @@ router = APIRouter(tags=["catalog"])
     "/products",
     response_model=Page[ProductOut],
     summary="Catalog products, newest `updated_at` first",
-    responses={400: {"model": ErrorOut}},
+    responses={400: {"model": ErrorOut}, 500: {"model": ErrorOut}},
 )
 def list_products(
     vendor_id: VendorId = None, limit: Limit = DEFAULT_LIMIT, offset: Offset = 0

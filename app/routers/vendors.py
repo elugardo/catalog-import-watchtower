@@ -13,7 +13,7 @@ router = APIRouter(tags=["catalog"])
     "/vendors",
     response_model=Page[VendorOut],
     summary="Vendor filter options",
-    responses={400: {"model": ErrorOut}},
+    responses={400: {"model": ErrorOut}, 500: {"model": ErrorOut}},
 )
 def list_vendors(limit: Limit = DEFAULT_LIMIT, offset: Offset = 0) -> Page[VendorOut]:
     return lists.list_vendors(limit, offset)

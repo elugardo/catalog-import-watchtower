@@ -127,9 +127,12 @@ def test_list_endpoints_take_limit_offset_and_document_invalid_query(path, opena
     expected = {"limit", "offset", "vendor_id"} if path == "/api/products" else {"limit", "offset"}
     assert set(parameters) == expected
 
-    assert set(get["responses"]) == {"200", "400"}
+    assert set(get["responses"]) == {"200", "400", "500"}
     invalid = _resolve(get["responses"]["400"], openapi)
     assert invalid["content"]["application/json"]["example"]["code"] == "INVALID_QUERY"
+    # `_docs/api.md` -> Conventions: a list request while the database is unreachable.
+    internal = _resolve(get["responses"]["500"], openapi)
+    assert internal["content"]["application/json"]["example"]["code"] == "INTERNAL_ERROR"
 
     envelope = _resolve(get["responses"]["200"]["content"]["application/json"]["schema"], openapi)
     assert set(envelope["properties"]) == {"items", "total"}
@@ -146,7 +149,7 @@ def test_products_vendor_id_is_an_optional_integer(openapi):
     assert vendor_id["schema"]["type"] == "integer"
 
 
-def test_every_4xx_uses_the_one_error_schema(openapi):
+def test_every_4xx_and_5xx_uses_the_one_error_schema(openapi):
     error_ref = {"$ref": "#/components/schemas/Error"}
     seen = 0
     for item in openapi["paths"].values():
@@ -154,11 +157,19 @@ def test_every_4xx_uses_the_one_error_schema(openapi):
             if method not in HTTP_METHODS:
                 continue
             for status, response in operation["responses"].items():
-                if status.startswith("4"):
+                if status.startswith(("4", "5")):
                     assert _error_code_schema(response, openapi) == error_ref, (method, status)
                     seen += 1
-    assert seen == 7  # POST 400 and 413, detail 404, the four list 400s
+    # POST 400 and 413, detail 404, the four list 400s and the four list 500s.
+    assert seen == 11
     error = openapi["components"]["schemas"]["Error"]
+    assert "every 4xx and 5xx response" in error["description"]
+    codes = error["properties"]["code"]["description"]
+    for code in (
+        "MISSING_FIELD", "INVALID_FIELD", "INVALID_CONTENT_TYPE", "INVALID_ENCODING",
+        "FILE_TOO_LARGE", "INVALID_QUERY", "NOT_FOUND", "METHOD_NOT_ALLOWED", "INTERNAL_ERROR",
+    ):  # fmt: skip
+        assert code in codes, code
     assert set(error["required"]) == {"code", "message", "details"}
     assert error["properties"]["code"]["type"] == "string"
     assert error["properties"]["message"]["type"] == "string"

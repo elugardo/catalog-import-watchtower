@@ -20,11 +20,99 @@ test is Postgres transactions and unique constraints.
 
 ## The one command
 
-Issue 06 defines it and writes it into `AGENTS.md` → *Commands*. Requirements:
-runs every layer above, exits non-zero on any failure, works on a clean
-checkout with Docker available, and is the same command CI runs. The likely
-shape is a `compose.test.yaml` profile or a `scripts/test` wrapper; the
-engineer chooses, documents, and makes CI call exactly that.
+```
+docker compose -f compose.yaml -f compose.test.yaml run --rm --build test
+```
+
+Run it from the repository root. It needs **Docker with Compose v2 and git,
+nothing else**: no `uv`, Python or Node on the host. The same line works
+unchanged in Windows PowerShell, in Git Bash and on the CI runner (the
+`tests` job of `.github/workflows/ci.yml` runs exactly this line). On Windows,
+start Docker Desktop first.
+
+**What it starts.** The overlay `compose.test.yaml` adds one service, `test`,
+to the stack of `compose.yaml` (same project, `ciw`). `run` starts the
+Compose `db` if it is not running yet, or uses the running one as it is (a
+stack started with `docker compose up -d --wait` is not recreated), builds
+the `ciw-test:local` image from `Dockerfile.test` and runs it once, then
+removes the container. Nothing else of the stack is started. The `test`
+service has a `test` profile, so `docker compose up` never starts it, even
+with the overlay.
+
+**What it runs**, in order, through `scripts/run_tests.py`: backend unit
+(`pytest tests/unit`), backend integration against the Compose `db`
+(`pytest tests --ignore=tests/unit`, so a new folder such as `tests/oncall/`
+joins with no change to the command), `npm --prefix web run check:api` and
+Vitest (`npm --prefix web test`). Every layer runs even when an earlier one
+failed. The run ends with one summary line per layer and a verdict:
+
+```
+==== test summary ==========================================
+unit         PASSED  372 tests
+integration  PASSED  178 tests
+check:api    PASSED  1 check
+frontend     PASSED  49 tests
+==== ALL LAYERS PASSED
+```
+
+The exit code is non-zero when any layer failed. A layer that ran zero tests
+counts as failed, and so does the integration layer when the database is
+unreachable (its tests error, they are never skipped).
+
+**It leaves your data alone.** The integration tests never truncate, delete
+or change rows they did not create: the rollback-only `db` session, the `ns`
+per-test vendor token (with cleanup of every row that token leads to) and
+`throwaway_url` (a separate database, dropped afterwards) for anything
+destructive such as the migration round trip, or `isolated_db` (the same,
+migrated, with the app pointed at it). No test uses a fixed vendor
+name that demo, fixture or QA data can hold. The `pgdata` volume is kept, so
+the demo upload and anything else in your database survive a run, and the
+command passes twice in a row with no cleanup. Code under test that touches
+rows it did not create runs on its own migrated throwaway database
+(`isolated_db`). The startup sweep is such code: it fails *every*
+`PROCESSING` import in the database it is pointed at, and it runs whenever
+the app's lifespan does, that is whenever a `TestClient` is entered as a
+context manager (`with TestClient(create_app()):`). So every test that enters
+one against a real database uses `isolated_db`: the sweep tests in
+`test_import_sweep.py` and `test_alert_sweep.py`, and
+`test_failure_injection.py::test_when_the_failure_write_fails_too_the_sweep_finishes_it`.
+The `client` fixture and `make_client` return a `TestClient` that is not
+entered, so they never sweep; the one other test that enters one
+(`tests/unit/test_import_errors.py`, startup with the database down) points
+at an unreachable database. A new test that needs the lifespan uses
+`isolated_db` too.
+
+**Nothing on the host is used or modified.** The image copies the checkout
+in (`Dockerfile.test.dockerignore` leaves out `.env`, `.venv/`,
+`node_modules/` and build output) and installs its own Python and Node
+dependencies, so a Windows `.venv/` or `web/node_modules/` neither breaks nor
+changes. Scripts the container runs from the checkout are LF in
+`.gitattributes` (`scripts/**`), so a `core.autocrlf=true` checkout works.
+The runtime image (`Dockerfile`, `ciw:local`) is unchanged and still has no
+`tests/` and no dev dependencies.
+
+**How long.** Measured on the Windows dev machine (Docker Desktop): a cold
+run (test image built with no cache, empty volume, base images already
+pulled) takes about 2.5 minutes (25 s build, about 2 minutes of tests); the
+first pull of the `python`, `node`, `uv` and `postgres` base images adds a few
+minutes once. A warm run (image cached, `db` up) takes about 1.5 minutes,
+most of it the integration layer (about 1 minute).
+
+**One layer alone.** Inside the container, name the layers after the service:
+
+```
+docker compose -f compose.yaml -f compose.test.yaml run --rm --build test python scripts/run_tests.py unit
+docker compose -f compose.yaml -f compose.test.yaml run --rm --build test python -m pytest tests/integration/test_constraints.py
+```
+
+On the host (needs `uv` or Node, with the Compose `db` published on
+`localhost:5432` for the integration layer): `uv run pytest tests/unit`,
+`uv run pytest tests --ignore=tests/unit`, `npm --prefix web run check:api`,
+`npm --prefix web test` (`AGENTS.md` -> *Commands*).
+
+**A wrong database fails.** For example
+`docker compose -f compose.yaml -f compose.test.yaml run --rm --build -e DATABASE_URL=postgresql+psycopg://ciw:wrong@db:5432/ciw test`
+exits non-zero with the integration layer reported failed.
 
 ## What to test (and what each spec scenario maps to)
 
@@ -35,7 +123,7 @@ engineer chooses, documents, and makes CI call exactly that.
 | 3 atomic validation | integration: `invalid.csv` → `FAILED`, error names row and column, products unchanged (compare full snapshot, not just count) |
 | 4 recovery | integration with fake LLM: injected failure → alert → worker → `COMPLETED`, 2 attempts, alert `RESOLVED`, timeline rows, products written exactly once |
 | 5 guardrails | unit + integration: validation error → no retry; two concurrent retry calls → one attempt; third attempt refused as a no-op that returns the current state (no exception, no new attempt row); `resolve_alert` on a failed import refused |
-| 6 reproducibility | CI job: `docker compose up --build -d --wait` then `GET /api/health` is 200; the one test command passes |
+| 6 reproducibility | CI job `compose-up`: `docker compose up --build -d --wait` then `GET /api/health` is 200 with `db: ok`, logs on failure, always `down -v`; CI job `tests`: the one test command passes |
 
 Also always cover: the empty file, header-only file, missing, duplicate and
 differently-cased headers, BOM, empty lines in the middle, 256 KiB boundary

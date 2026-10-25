@@ -18,6 +18,7 @@ from app.db import get_engine
 from app.main import create_app
 from app.schemas.upload import UploadRequest
 from app.services import importer
+from tests.integration.conftest import Namespace
 from tests.integration.contract import walk
 from tests.integration.importing import (
     alert_rows,
@@ -224,9 +225,11 @@ def test_exceptions_in_the_upsert_map_to_their_code_and_roll_back(
 
 
 def test_when_the_failure_write_fails_too_the_sweep_finishes_it(
-    database_url, migrated_engine, monkeypatch, make_client, ns
+    isolated_db, monkeypatch, make_client
 ):
-    make_client(DATABASE_URL=database_url)  # points the app at the test database
+    # The sweep touches every PROCESSING import, so it runs on its own database.
+    database_url, migrated_engine = isolated_db
+    ns = Namespace(migrated_engine)
     before = all_products(migrated_engine)
 
     def failing_upsert(session, vendor_id, rows):
@@ -255,7 +258,7 @@ def test_when_the_failure_write_fails_too_the_sweep_finishes_it(
     assert alert_rows(migrated_engine, import_id) == []
     assert all_products(migrated_engine) == before
 
-    monkeypatch.undo()
+    monkeypatch.undo()  # also drops DATABASE_URL; point the app at the isolated database again
     make_client(DATABASE_URL=database_url)
     with TestClient(create_app()):  # the lifespan runs the sweep
         pass

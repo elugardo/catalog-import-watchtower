@@ -43,6 +43,10 @@ lands; whoever creates one updates this section in the same PR.
 ├── .github/workflows/     ci.yml (PR checks); deploy-dev.yml, promote-prod.yml (issue 10)
 ├── openapi.yaml           API contract (OpenAPI 3.1), written before the code; validated in CI
 ├── compose.yaml           app, oncall-agent, db, otel-lgtm; one command; every ${VAR} has a default
+├── compose.test.yaml      test overlay: only the `test` service of the one test command; never part of `up`
+├── Dockerfile.test, Dockerfile.test.dockerignore   the test image (never deployed); its own ignore file keeps tests/ out of the runtime context
+├── scripts/run_tests.py   entry point of the `test` container: every layer in order, one summary line each
+├── .gitattributes         fixtures/*.csv unconverted; scripts/** LF
 ├── Dockerfile, .dockerignore   multi-stage: node builds web/, then the Python image serving SPA + API; APP_VERSION build arg
 ├── .env.example           every variable, no secrets
 ├── pyproject.toml, uv.lock, .python-version   one package for app and worker; `[tool.uv] package = false`
@@ -70,18 +74,18 @@ gh issue view <n> --comments                          # one issue with its groom
 docker compose up --build                             # app :8000 (SPA + API), db :5432, Grafana :3000, idle worker
 docker compose up --build -d --wait                   # same, detached; returns once /api/health reports db: ok
 docker compose down -v                                # stop and drop the data volume
-uv run pytest tests/unit                              # backend unit tests; no database needed
-uv run pytest tests/integration                       # backend integration tests against the Compose db (localhost:5432); runs `alembic upgrade head` first
-uv run openapi-spec-validator openapi.yaml            # validate the OpenAPI 3.1 contract (also a CI step)
+docker compose -f compose.yaml -f compose.test.yaml run --rm --build test   # THE test command: unit, integration, check:api, Vitest; needs only Docker (_docs/testing.md)
+uv run pytest tests/unit                              # one layer on the host (needs uv): backend unit tests; no database needed
+uv run pytest tests --ignore=tests/unit               # one layer on the host (needs uv): integration against the Compose db (localhost:5432); runs `alembic upgrade head` first
+uv run openapi-spec-validator openapi.yaml            # validate the OpenAPI 3.1 contract (in the test command via tests/unit/test_openapi_contract.py)
 uv run alembic upgrade head                           # apply migrations to DATABASE_URL (the app entrypoint does this too)
 uv run alembic check                                  # fails if the models and the migrations differ
 uv run alembic revision --autogenerate -m "<what>"    # draft a new, additive-only revision; review it before committing
 npm --prefix web run dev                              # Vite dev server :5173, proxies /api to the API on :8000
 npm --prefix web run gen:api                          # regenerate web/src/api/schema.d.ts from openapi.yaml (commit the result)
-npm --prefix web run check:api                        # fails when schema.d.ts differs from openapi.yaml (also a CI step)
-npm --prefix web test                                 # frontend tests (Vitest + Testing Library, fetch stubbed)
-npm --prefix web run build                            # typecheck + production bundle in web/dist
-<single test command>                                 # all of the above in one go (issue 06)
+npm --prefix web run check:api                        # one layer on the host (needs Node): fails when schema.d.ts differs from openapi.yaml
+npm --prefix web test                                 # one layer on the host (needs Node): frontend tests (Vitest + Testing Library, fetch stubbed)
+npm --prefix web run build                            # typecheck + production bundle in web/dist (in CI through the image build)
 docker compose exec app python -m app.oncall tools <tool> [args]   # run one agent tool by hand (issue 08)
 ```
 

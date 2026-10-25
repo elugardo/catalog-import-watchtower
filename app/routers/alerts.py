@@ -17,7 +17,7 @@ router = APIRouter(tags=["alerts"])
     "/alerts",
     response_model=Page[AlertListItemOut],
     summary="Current and recent incidents with their import summary",
-    responses={400: {"model": ErrorOut}},
+    responses={400: {"model": ErrorOut}, 500: {"model": ErrorOut}},
 )
 def list_alerts(limit: Limit = DEFAULT_LIMIT, offset: Offset = 0) -> Page[AlertListItemOut]:
     return lists.list_alerts(limit, offset)

@@ -42,11 +42,12 @@ No authentication, multi-tenant access control, supplier API integrations, webho
 - Upload is limited to UTF-8 CSV (optional UTF-8 BOM), maximum **256 KiB** and **500 product data rows**.
 - **Checks that need no parsing are rejected before any record exists** (HTTP 4xx with the stable error shape of §7): a missing or invalid `vendor_name` or `file` (400 `MISSING_FIELD` / `INVALID_FIELD`); a filename not ending in `.csv`, or a content type other than `text/csv`, `text/plain`, `application/vnd.ms-excel`, `application/octet-stream` (400 `INVALID_CONTENT_TYPE`); bytes that are not valid UTF-8 (400 `INVALID_ENCODING`); more than 256 KiB (413 `FILE_TOO_LARGE`; the server reads at most 256 KiB + 1 byte and never trusts `Content-Length`).
 - These checks run in this order, and the first failure is returned: fields, then filename and content type, then size, then encoding. The `.csv` suffix matches in any case, content-type parameters (such as `; charset=utf-8`) are ignored, and a file part with no content type counts as `text/plain`. The size limit is a bounded read of the received file part; the framework's multipart spooling is kept and there is no streaming parser.
+- The browser does no blocking input validation: the vendor input has no `maxLength` and no `required`, and a blank, whitespace-only or over-long name, or a missing file, is sent to the server and the API's `CODE: message` is shown. The server is the one source of these rules; a non-blocking hint such as "1 to 80 characters" is allowed.
 - **Everything that needs parsing is a validation error on a durable `FAILED` import**, including more than 500 data rows (one error: "file has N data rows, limit 500").
 - The UI shows the import result and a link to its detail page.
 - Each upload creates a durable import record with filename, vendor, time, status, and stored source CSV for a possible retry.
 
-**Acceptance:** A valid sample CSV creates a completed import; refreshing the page retains its status and resulting products.
+**Acceptance:** A valid sample CSV creates a completed import. After a browser refresh, the import history and the import detail still show its status and resulting products, read back from the API (the UI keeps no state of its own). Refreshing the Upload page shows an empty form and never uploads again.
 
 ### F2 — Validate and upsert products atomically
 
@@ -91,6 +92,7 @@ Validation rules:
 - **Products:** filter by vendor, showing SKU, name, price, quantity, and last updated time.
 - Define import statuses as `PROCESSING`, `COMPLETED`, and `FAILED`. **Recovered** is a UI label for a `COMPLETED` import with more than one attempt, not a separate persisted status.
 - Show clear empty states and API-error messages. Basic responsive layout; no elaborate design system required.
+- Every timestamp is shown in UTC as `YYYY-MM-DD HH:MM:SS UTC` (`2026-10-24T12:00:00Z` is `2026-10-24 12:00:00 UTC`), never in the browser's time zone, through one shared formatter.
 - Lists show the newest 50 records. Only the products list pages (`limit`/`offset`, a "load more" control), because one import can add 500 rows.
 
 **Acceptance:** An operator can follow an upload to the import detail and then find imported products. A failed import shows why it failed.
@@ -170,7 +172,7 @@ No Redis, Celery, Kubernetes, nginx, additional microservices, or third-party ve
 
 ## 9. Testing and acceptance scenarios
 
-Implement automated **unit tests** for CSV parsing, header validation, price/quantity rules, duplicate SKU detection, and agent retry policy/tool guards. Implement **integration tests** against PostgreSQL for import API + DB persistence, atomic rollback, upsert behavior, alert persistence, and retry idempotency. Mock the external LLM response in CI, but run at least one **documented real-LLM demonstration** for grading. Add 1–2 frontend tests for upload and import outcome rendering.
+Implement automated **unit tests** for CSV parsing, header validation, price/quantity rules, duplicate SKU detection, and agent retry policy/tool guards. Implement **integration tests** against PostgreSQL for import API + DB persistence, atomic rollback, upsert behavior, alert persistence, and retry idempotency. Mock the external LLM response in CI, but run at least one **documented real-LLM demonstration** for grading. Add a small set of frontend tests (Vitest + Testing Library, API stubbed) for upload and import outcome rendering: a few per page, covering the outcomes it renders, not one per component.
 
 ### Must-pass scenarios
 

@@ -64,7 +64,9 @@ wins), and redaction of every agent tool result.
   `invalid.csv` are the ones the spec and the demo name; edge-case files live
   next to them with descriptive names. Tests that need a 257 KiB file
   generate it.
-- **Frontend tests stay small**: the two or three the spec asks for, through
-  rendered text and roles, with the API client stubbed.
+- **Frontend tests stay small**: a few per page, one for each outcome the
+  page renders (success, validation failure, error response, empty state,
+  the Recovered label), through rendered text and roles, with `fetch`
+  stubbed and no network.
 - **No asserting on exact whitespace** or layout; assert that the important
   text and states are present.

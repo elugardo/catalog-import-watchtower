@@ -40,7 +40,8 @@ head` from its entrypoint and only then starts uvicorn, so a cold start shows
 no connection-refused traceback and no restart. Its own health check calls
 `/api/health` and is healthy only when `db` is `"ok"`. While `db` is stopped
 `/api/health` still answers 200 with `db: "error"`, `status: "degraded"`
-within the connect timeout; it recovers by itself when `db` is back.
+after the probe deadline, `DATABASE_CONNECT_TIMEOUT_SECONDS` + 1 s (3 s by
+default); it recovers by itself when `db` is back.
 
 | Service | URL | Notes |
 |---|---|---|

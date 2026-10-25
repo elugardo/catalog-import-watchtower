@@ -1,11 +1,14 @@
 # API
 
-`openapi.yaml` at the project root is the contract. Issue 02 writes it before
-any endpoint is implemented; after that the backend's generated schema is
-checked against it in CI, and the frontend's client types are derived from
-it. This file holds the conventions and the error catalogue that the YAML
-alone does not explain. If the two disagree, `openapi.yaml` wins and this file
-is fixed.
+`openapi.yaml` at the project root is the contract (OpenAPI 3.1). Issue 02
+wrote it before any endpoint was implemented; CI validates it
+(`uv run openapi-spec-validator openapi.yaml`), and a unit test holds the
+Pydantic response models in `app/schemas/` to its property names. The
+generated-schema drift check, which compares the running app's
+`/api/openapi.json` with the YAML, lands in CIW-03.2 (#4); the frontend's
+client types are derived from the YAML in CIW-04.1 (#5). This file holds the
+conventions and the error catalogue that the YAML alone does not explain. If
+the two disagree, `openapi.yaml` wins and this file is fixed.
 
 ## Conventions
 
@@ -26,10 +29,21 @@ is fixed.
   `{ "line": 3, "column": "quantity", "message": "must be a whole number, got '-2'" }`
   with `line` the **file line number** (header = 1), plus
   `validation_error_count` for the total beyond the 20 shown.
-- Lists return `{ "items": [...], "total": n }` with `limit` (default 50,
-  max 100) and `offset`. Newest first.
+- The four list endpoints (`GET /api/imports`, `/api/vendors`,
+  `/api/products`, `/api/alerts`) return `{ "items": [...], "total": n }`,
+  both required, newest first, with `limit` (default 50, min 1, max 100) and
+  `offset` (default 0, min 0); a malformed or out-of-range value is 400
+  `INVALID_QUERY`. Only the products list pages in the UI; on the others the
+  parameters just bound the response.
 - Timestamps are ISO-8601 UTC with `Z`. Money is `price_cents` (integer);
-  the frontend formats dollars.
+  the frontend formats dollars. No response carries `csv_bytes`, a
+  `normalized_*` column or a price in dollars.
+- On the import resource, `product_count` is `null` unless the import is
+  `COMPLETED`, and `completed_at` is set only on the transition to
+  `COMPLETED` (a `FAILED` import's end time is its last attempt's
+  `finished_at`). `GET /api/imports/{id}` and the 201 of `POST /api/imports`
+  return the **import detail**: the import plus `attempts[]`, `alert`
+  (nullable) and `agent_actions[]`.
 - Enum values are upper snake case strings exactly as in spec §6.
 - `recovered` is a derived boolean on the import resource
   (`status == COMPLETED and attempt_count > 1`), never stored.
@@ -41,13 +55,13 @@ is fixed.
 
 | Method | Route | Purpose | Notable responses |
 |---|---|---|---|
-| `POST` | `/api/imports` | multipart `vendor_name`, `file`, optional `inject_transient_failure` (`true`/`false`) | 201 import; 400 `MISSING_FIELD`, `INVALID_FIELD`, `INVALID_CONTENT_TYPE`, `INVALID_ENCODING`; 413 `FILE_TOO_LARGE` |
-| `GET` | `/api/imports` | recent imports, newest 50 | 200 list |
+| `POST` | `/api/imports` | multipart `vendor_name`, `file`, optional `inject_transient_failure` (`true`/`false`, default `false`) | 201 import detail (for `COMPLETED` and `FAILED` alike); 400 `MISSING_FIELD`, `INVALID_FIELD`, `INVALID_CONTENT_TYPE`, `INVALID_ENCODING`; 413 `FILE_TOO_LARGE` |
+| `GET` | `/api/imports` | recent imports, newest 50; `limit`/`offset` | 200 list; 400 `INVALID_QUERY` |
 | `GET` | `/api/imports/{id}` | detail: errors (≤ 20 + total), attempts, alert, agent timeline | 200; 404 `NOT_FOUND` |
-| `GET` | `/api/vendors` | vendor filter options | 200 list |
+| `GET` | `/api/vendors` | vendor filter options; `limit`/`offset` | 200 list; 400 `INVALID_QUERY` |
 | `GET` | `/api/products` | catalog; optional `vendor_id`; `limit`/`offset` | 200 list; 400 `INVALID_QUERY` |
-| `GET` | `/api/alerts` | open and recent alerts with import summary | 200 list |
-| `GET` | `/api/health` | always 200 while up; `{ status, db: "ok"\|"error", agent_enabled, version }` | 200 |
+| `GET` | `/api/alerts` | open and recent alerts with import summary (`import_id`, `import_status`, `failure_code`, `vendor_display_name`, `filename`); `limit`/`offset` | 200 list; 400 `INVALID_QUERY` |
+| `GET` | `/api/health` | always 200 while up; `{ status: "ok"\|"degraded", db: "ok"\|"error", agent_enabled, version }`; `status` is `degraded` when `db` is `error` | 200 |
 
 ## Codes
 

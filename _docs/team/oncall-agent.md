@@ -63,8 +63,10 @@ system, no HTTP, no SQL. The same functions back the maintenance CLI
 | `resolve_alert(alert_id)` | alert → `RESOLVED` | only when the import is `COMPLETED` |
 
 The guards live in the functions, not in the prompt. A prompt that behaves
-is nice; a function that refuses is the actual control. Every call writes
-its own `TOOL_CALL` audit row.
+is nice; a function that refuses is the actual control. Every call whose
+target has an alert writes its own `TOOL_CALL` audit row, refused calls
+included; a call on an unknown id, or on an import that never failed, writes
+none.
 
 ## Policy
 

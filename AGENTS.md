@@ -47,13 +47,13 @@ lands; whoever creates one updates this section in the same PR.
 ├── .env.example           every variable, no secrets
 ├── pyproject.toml, uv.lock, .python-version   one package for app and worker; `[tool.uv] package = false`
 ├── alembic.ini, alembic/  migrations; env.py reads DATABASE_URL from app.settings and imports app.models; versions/ holds the first revision (the six tables, issue 02); later revisions are additive-only
-├── app/                   FastAPI package: main.py, settings.py, db.py (engine, Base with the constraint naming convention), routers/health.py; app/oncall/ is the worker (idle stub; loop in issue 08); app/static/ is the built SPA (git-ignored)
+├── app/                   FastAPI package: main.py, settings.py, db.py (engine, Base with the constraint naming convention), routers/health.py; app/services/ is the service layer (csv_validation.py: pure bytes -> rows | errors; importer in CIW-03.2, #4); app/oncall/ is the worker (idle stub; loop in issue 08); app/static/ is the built SPA (git-ignored)
 │   ├── models/            SQLAlchemy models of the six tables (catalog.py, imports.py, incidents.py) and enums.py (the CHECK values)
 │   └── schemas/           Pydantic v2 response models mirroring openapi.yaml (a unit test keeps them in step)
 ├── tests/                 conftest.py, unit/ (no database; contract tests), integration/ (real Postgres on localhost:5432, migrated by Alembic; schema, constraints, migration round trip); oncall/ (issue 08)
 ├── web/                   React 18 + TypeScript + Vite; Vitest + Testing Library in src/__tests__/; `npm run build` -> dist/, copied into app/static by the Dockerfile
 ├── observability/         otel-lgtm config + Grafana provisioning, all in-repo (issue 09)
-├── fixtures/              valid.csv, update.csv, invalid.csv           (issue 03)
+├── fixtures/              valid.csv, update.csv, invalid.csv + edge cases; byte-exact (`.gitattributes`: -text)
 ├── _docs/                 spec, spec-review, process, architecture, api, testing, operations, rubric, backlog, team/, adr/, evidence/
 ├── .agents/skills/        incident-response/SKILL.md (canonical skill)
 └── .claude/               agents/ (PM, engineer, QA), skills/

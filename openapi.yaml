@@ -278,6 +278,13 @@ components:
           description: File line number; the header is line 1, the first data row line 2.
         column:
           type: string
+          description: >-
+            What the finding is about. A field name in lowercase (`sku`, `name`,
+            `price`, `quantity`) for a field rule on that row, whatever the file's
+            header casing; `header` for an invalid header row (then the only
+            finding); `row` for a record that is wrong as a whole (field count
+            differs from the header, or it cannot be parsed); `file` for the file
+            as a whole (no data rows, more than 500 data rows), always on line 1.
         message:
           type: string
 

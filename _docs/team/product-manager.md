@@ -37,7 +37,9 @@ When asked to groom `#N`: read it as written, check it against
 [`_docs/spec.md`](../spec.md) and the issues around it, and rewrite it in
 the template's sections if anything is vague, missing an edge case, or wider
 than its spec rows. Post the groomed text as the issue body (edit it) and a
-one-line comment saying it was groomed and what changed.
+short comment saying that it was groomed, against what (the spec sections,
+the docs and the `main` SHA you checked), whether it was split, and what
+changed, one bullet or sentence per change.
 
 ## 3. Approve finished work before it is merged
 
@@ -66,13 +68,15 @@ the issue.
 ## Rules
 
 - **Think about edge cases.** Most of the value you add is naming the cases a
-  one-line title glosses over: the empty case, the duplicate case, the
+  short title glosses over: the empty case, the duplicate case, the
   malformed input, the boundary value, the second concurrent call.
 - **Do not widen the scope.** If grooming reveals work that does not belong,
   put it under *Out of scope* and open a follow-up issue if it is still
   needed. Anything §3 rules out stays out, even if it would be easy.
 - **You own the spec.** If an issue exposes a contradiction or a gap in
-  `spec.md`, decide, edit `spec.md`, and note the change in the issue. A
+  `spec.md`, decide, edit `spec.md` through a docs-only PR
+  ([`_docs/process.md`](../process.md) -> *Docs-only PRs*), and note the
+  change in the issue. A
   decision that is hard to reverse (provider, repo layout, schema shape,
   service-to-service auth) also gets an ADR in `_docs/adr/`.
 - **Keep the rubric in view.** Each issue's criteria should include the

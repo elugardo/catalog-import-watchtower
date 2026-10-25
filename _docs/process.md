@@ -37,14 +37,43 @@ optional.
    `CHANGES REQUESTED` the engineer fixes it and the loop goes back to
    step 4.
 9. **On APPROVED, the orchestrator merges** with `gh pr merge <pr> --squash
-   --delete-branch` once CI is green, then **closes the issue with the
-   evidence** in its final comment: the merged PR and commit SHA, the CI
-   run, the QA comment, the PM approval, and whatever the rubric row in
-   [`rubric.md`](rubric.md) asks for (a screenshot, a URL, a trace id). Then
-   it moves on to the next issue whose dependencies are closed. Marcos is
-   not a merge gate: he reviews the record asynchronously and reopens an
-   issue if something is wrong (decided 2026-10-24; before that, he merged
-   every PR by hand).
+   --delete-branch` once CI is green, and **links the commits and the PR
+   on the issue** in its closing comment: the merged PR and its squash
+   commit SHA, the green CI run on the PR head, the QA comment, the PM
+   approval, and whatever the rubric row in [`rubric.md`](rubric.md) asks
+   for (a screenshot, a URL, a trace id). The branch commits already say
+   `Refs #<n>` and the PR body links the issue (steps 4 and 5).
+10. **Close only after the evidence is recorded.** The orchestrator posts
+   that comment first and then runs `gh issue close <n>`; nothing else
+   closes an issue (see *Conventions* on closing keywords). Then it moves on
+   to the next issue whose dependencies are closed. Marcos is not a merge
+   gate: he reviews the record asynchronously and reopens an issue if
+   something is wrong (decided 2026-10-24; before that, he merged every PR
+   by hand).
+
+## Docs-only PRs
+
+A PM groom or approval comment often decides that `_docs/spec.md`,
+`_docs/backlog.md`, another `_docs/` file or a role file must change: the
+spec catches up with a decision, a follow-up is folded in, a split is
+recorded. That change does not wait for an issue of its own. It runs like
+this, as it did from #3 on (PRs #20, #23, #25, #29, #32, #34, #37, #38, #41
+and #45):
+
+1. The change goes on a branch named `docs-<topic>` from an up-to-date
+   `main`, with commits `Docs: <what changed>` and `Refs #<n>`.
+2. The PR body links the PM comment that decided it and says
+   `Refs #<n>` for the issue that comment is on.
+3. It changes only files under `_docs/`.
+4. It merges with `gh pr merge <pr> --squash --delete-branch` on green CI,
+   without its own QA or PM approval cycle: the PM comment it carries out
+   is the approval.
+5. It is merged before any issue's code depends on it, so the spec changes
+   before the code (see *When the spec is wrong*).
+
+A docs follow-up issue that such a PR settles is closed by the
+orchestrator with a comment linking the merged PR, not by a keyword in the
+PR body.
 
 ## Before the loop: building the backlog
 
@@ -61,13 +90,22 @@ session.
 
 ## Conventions
 
-- **Branches:** `fp-<issue>-<slug>`. Never commit feature work to `main`.
+- **Branches:** `fp-<issue>-<slug>` for an issue, `docs-<topic>` for a
+  docs-only PR. Never commit to `main` directly.
 - **Commits:** `Final project: <what changed>` on the first line, `Refs #<n>`
-  in the body. Small and frequent. Never `Closes #<n>`: that lets GitHub close
-  the issue at merge and skips the QA gate.
+  in the body (`Docs: <what changed>` on a `docs-<topic>` branch). Small and
+  frequent.
 - **PRs:** one issue per PR, title `[CIW-NN] <issue title>`, body = criteria
-  checklist with how each was checked, test output, and what the reviewer
-  should look at first.
+  checklist with how each was checked, test output, the green CI run, and
+  what the reviewer should look at first. The squash commit on `main` takes
+  the PR title: `[CIW-NN] <issue title> (#<pr>)`, or `Docs: <what> (#<pr>)`
+  for a docs-only PR.
+- **No closing keywords.** GitHub closes an issue for `close`, `closes`,
+  `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves` or `resolved`
+  followed by an issue number anywhere in a commit message, a PR body or a
+  PR title, even inside "do not close", and that skips the QA and PM gates.
+  Never write those words next to an issue number; write `Refs #<n>`
+  (the same rule as [`team/software-engineer.md`](team/software-engineer.md)).
 - **Issue comments are the audit trail.** PM grooming, engineer hand-off, QA
   verdict and the closing evidence are all comments on the issue, so a
   reviewer can read the whole story from the tracker.
@@ -117,8 +155,10 @@ role files) and does not groom, implement or test itself. Shortcuts:
 Rules: step 2 is never skipped; the engineer never closes or merges; QA never
 fixes; the PM never writes code; the orchestrator merges only after PASS
 *and* APPROVED *and* green CI, and closes only after the evidence is
-recorded. The human review is of the record, not a gate in front of the
-merge.
+recorded. The one exception to "merges only after PASS and APPROVED" is a
+docs-only PR (see *Docs-only PRs*): it changes only `_docs/`, carries out a
+PM comment, and merges on green CI. The human review is of the record, not
+a gate in front of the merge.
 
 Separate roles buy independence, not ceremony: an engineer's green suite proves
 the tests pass, not that the criteria are met. A fresh reader checking the

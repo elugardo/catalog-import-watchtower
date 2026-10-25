@@ -11,7 +11,9 @@ every status change after `OPEN` are CIW-08.1 (#10).
   the worker owns the status once the alert exists.
 - The `reason` is one of five fixed, content-free strings built below. It never
   quotes a CSV cell, a vendor or product name, a filename, an exception message
-  or an exception type, since it reaches the UI, the API and the LLM prompt.
+  or the raised exception's type (the fixed word `OperationalError` in
+  `operational_reason` names the class matched, not `type(exc)`), since it
+  reaches the UI, the API and the LLM prompt.
 """
 
 from collections.abc import Iterable

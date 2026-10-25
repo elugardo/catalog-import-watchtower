@@ -117,7 +117,7 @@ Two layers, both required:
    **Reasons.** The `reason` is exactly one of these fixed, content-free
    strings (`<n>` is the attempt number, `<k>` the stored
    `validation_error_count`), at most 200 characters, never quoting a CSV
-   cell, a name, a filename or an exception message or type:
+   cell, a name, a filename, an exception message or the raised exception's type (the fixed word `OperationalError` names the class matched):
 
    | Failure | `reason` |
    |---|---|

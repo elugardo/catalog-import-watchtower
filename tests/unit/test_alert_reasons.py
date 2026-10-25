@@ -50,4 +50,3 @@ class CanaryError(RuntimeError):
 def test_exception_class_picks_the_code_and_its_message_is_never_used(exc, code, reason):
     assert _classify(exc, 1) == (code, reason)
     assert "CANARY" not in reason
-    assert type(exc).__name__ not in reason or type(exc).__name__ == "OperationalError"

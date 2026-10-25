@@ -5,7 +5,7 @@ wrote it before any endpoint was implemented; CI validates it
 (`uv run openapi-spec-validator openapi.yaml`), and a unit test holds the
 Pydantic response models in `app/schemas/` to its property names. The
 generated-schema drift check, which compares the running app's
-`/api/openapi.json` with the YAML, lands in CIW-03.2 (#4); the frontend's
+`/api/openapi.json` with the YAML, lands in CIW-03.2b (#24); the frontend's
 client types are derived from the YAML in CIW-04.1 (#5). This file holds the
 conventions and the error catalogue that the YAML alone does not explain. If
 the two disagree, `openapi.yaml` wins and this file is fixed.
@@ -68,6 +68,59 @@ the two disagree, `openapi.yaml` wins and this file is fixed.
 - There are **no internal or agent endpoints**. The agent's six tools are
   service-layer functions (`app/services/agent_tools.py`); see
   `architecture.md` and `team/oncall-agent.md`.
+
+## Errors: never 422
+
+No request ever answers 422 (CIW-03.2a, #4). FastAPI's
+`RequestValidationError` is mapped in `app/main.py`:
+
+- a malformed path parameter is **404 `NOT_FOUND`**: an id in
+  `GET /api/imports/{id}` that is not an integer of at least 1 (`abc`, `0`,
+  `-1`, `1.5`) names no import, and that route's contract has only 200 and
+  404. An id beyond the `BIGINT` range is also 404;
+- anything else is 400 `INVALID_FIELD` (query parameters become 400
+  `INVALID_QUERY` with the list endpoints, #24).
+
+`POST /api/imports` parses its multipart form itself, so its field errors
+never reach that handler: a field that is absent is 400 `MISSING_FIELD`; a
+field that is present but wrong (an invalid value, `file` sent as a text
+field, `vendor_name` sent as a file part) is 400 `INVALID_FIELD`, and so is a
+body that is not a parseable multipart form. A body that is not multipart at
+all has no fields, so it is `MISSING_FIELD`.
+
+## Upload checks (`POST /api/imports`, spec §4 F1)
+
+The checks that need no parsing run in this order; the response carries the
+code of the first one that fails, and nothing is written to the database:
+
+1. **field presence**: `vendor_name`, then `file` (`MISSING_FIELD`);
+2. **field values** (`INVALID_FIELD`): `vendor_name` trimmed with
+   `str.strip()`, then 1 to 80 characters that pass `str.isprintable()` (so a
+   tab or a line break inside the name is invalid); `inject_transient_failure`
+   exactly `true` or `false`, absent meaning `false` (`True`, `1`, `yes` and
+   `""` are invalid); `file` must be a file part;
+3. **filename and content type** (`INVALID_CONTENT_TYPE`): the filename ends
+   in `.csv` in any case (`catalog.CSV` is fine, `catalog.csv.txt` is not).
+   The part's media type, compared case-insensitively with its parameters
+   (`; charset=utf-8`) ignored, is one of `text/csv`, `text/plain`,
+   `application/vnd.ms-excel`, `application/octet-stream`. A file part with
+   no `Content-Type` is `text/plain` (RFC 7578 §4.4);
+4. **size** (413 `FILE_TOO_LARGE`): the handler does one bounded read of at
+   most 256 KiB + 1 byte from the file part and rejects anything longer. It
+   never trusts `Content-Length`, so a chunked body is held to the same
+   limit. Starlette's multipart parser may still spool the whole part to a
+   temporary file before the handler reads it; a streaming parser is out of
+   scope (spec §3);
+5. **encoding** (`INVALID_ENCODING`): the bytes, after an optional UTF-8
+   BOM, decode as UTF-8 (a Latin-1 `é` or a UTF-16 file is rejected).
+
+A 300 KiB non-UTF-8 `catalog.txt` is therefore `INVALID_CONTENT_TYPE`, and
+the same bytes as `catalog.csv` are `FILE_TOO_LARGE`. Everything past these
+checks, including a 0-byte file, creates an import and answers 201.
+
+On a re-upload, a product's stored `sku` takes the latest upload's spelling
+(`chair-001` replaces `CHAIR-001`, same row), like every other column; the
+vendor's `display_name` keeps the first spelling ever uploaded.
 
 ## Endpoints (spec §7)
 

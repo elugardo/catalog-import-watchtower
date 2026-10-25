@@ -5,7 +5,7 @@ attempts (`_docs/api.md`).
 """
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     BigInteger,
@@ -22,10 +22,13 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 from app.models.enums import ATTEMPT_STATUSES, FAILURE_CODES, IMPORT_STATUSES, check_in
+
+if TYPE_CHECKING:
+    from app.models.catalog import Vendor
 
 
 class Import(Base):
@@ -62,6 +65,12 @@ class Import(Base):
     )
     # Set only on the transition to COMPLETED (`_docs/architecture.md`, step 2.4).
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ORM navigation only, no schema change: the import detail embeds both.
+    vendor: Mapped["Vendor"] = relationship(lazy="joined")
+    attempts: Mapped[list["ImportAttempt"]] = relationship(
+        order_by="ImportAttempt.attempt_number", lazy="selectin"
+    )
 
 
 class ImportAttempt(Base):

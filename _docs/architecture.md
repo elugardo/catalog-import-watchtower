@@ -54,7 +54,8 @@ app/
   schemas/             Pydantic request/response models (mirror openapi.yaml)
   services/
     csv_validation.py  pure: bytes → (rows | errors); no DB
-    importer.py        transaction: validate, inject, upsert, attempts, status
+    importer.py        transaction: validate, inject, upsert, attempts, status; startup sweep; import detail
+    vendors.py         vendor find-or-create (ON CONFLICT DO NOTHING + select)
     alerts.py          create / claim / transition alerts, stale-claim reset
     agent_tools.py     the six guarded tool functions, each writes its audit row
   routers/             imports, vendors, products, alerts, health
@@ -101,12 +102,16 @@ The tables and enums are spec §6. On top of it:
 
 ## Import processing (the one flow that matters)
 
-1. `POST /api/imports` runs the no-parse checks (field presence, vendor name,
-   content type and filename, UTF-8, ≤ 256 KiB read with a hard cap) and
-   returns 4xx with no record if any fails. Otherwise it finds-or-creates the
-   vendor (`ON CONFLICT DO NOTHING` + select) and inserts the import with
-   `status = PROCESSING` in its own transaction.
-2. `importer.run_attempt(import_id)` inserts `import_attempts` row *n*
+1. `POST /api/imports` (`app/routers/imports.py`) runs the no-parse checks in
+   the order of `api.md` -> *Upload checks* (field presence, field values,
+   filename and content type, size by a bounded read of 256 KiB + 1 byte,
+   UTF-8) and returns 4xx with no record if any fails. Otherwise
+   `importer.create_import` finds-or-creates the vendor
+   (`app/services/vendors.py`: `INSERT … ON CONFLICT (normalized_name) DO
+   NOTHING` + select, committed on its own) and inserts the import with
+   `status = PROCESSING` in its own transaction. Processing is synchronous
+   inside the request (spec §8); no background task or queue.
+2. `importer.run_attempt(import_id, n)` inserts `import_attempts` row *n*
    (`RUNNING`, own transaction), starts a span with `import_id` and
    `attempt_number`, then:
    1. parses and validates the whole file (`csv_validation`, pure);
@@ -118,9 +123,18 @@ The tables and enums are spec §6. On top of it:
       write; a real `OperationalError` here maps to the same code, anything
       else to `INTERNAL_ERROR`; on failure: rollback, attempt `FAILED`,
       import `FAILED` with the code, alert created (or kept);
-   4. otherwise upserts every row by `(vendor_id, normalized_sku)`,
-      commits, marks the attempt `SUCCEEDED`, sets `COMPLETED`,
-      `product_count`, `completed_at`, clears `failure_code`.
+   4. otherwise upserts every row by `(vendor_id, normalized_sku)` with one
+      `INSERT … ON CONFLICT (vendor_id, normalized_sku) DO UPDATE` that
+      updates unconditionally and sets `updated_at = now()` itself (the
+      model's `onupdate` does not fire for a Core upsert), marks the attempt
+      `SUCCEEDED`, sets `COMPLETED`, `product_count`, `completed_at`, clears
+      `failure_code`, and commits all of that in the one upsert transaction,
+      so products and the `COMPLETED` transition land together or not at
+      all. Until CIW-05, any exception here is `INTERNAL_ERROR` and is
+      logged by exception type only.
+
+   The importer stores the first 20 of the validator's errors (the validator
+   itself stops at 1 000) and the total in `validation_error_count`.
 3. The response is `201` with the import resource; its `status` says what
    happened.
 4. `agent_tools.retry_failed_import(import_id)` takes `SELECT … FOR UPDATE`
@@ -129,8 +143,17 @@ The tables and enums are spec §6. On top of it:
    `FAILED`, the code is `TRANSIENT_STORAGE_TIMEOUT` and the count is 1, then
    runs step 2 with *n* = 2. Two concurrent calls: one proceeds, the other
    waits on the lock, re-reads, and no-ops.
-5. On startup, `app` sets any import still `PROCESSING` to `FAILED` /
-   `INTERNAL_ERROR` and creates its alert (crash recovery).
+5. On startup (the FastAPI lifespan in `app/main.py`; never in
+   `python -m app.oncall`), `importer.sweep_stuck_imports` sets any import
+   still `PROCESSING` to `FAILED` / `INTERNAL_ERROR` with `product_count` and
+   `completed_at` null, and sets its `RUNNING` attempt to `FAILED` /
+   `INTERNAL_ERROR` with `finished_at` = the sweep time, so the swept import
+   has an end time (spec §6: a `FAILED` import's end time is its last
+   attempt's `finished_at`). Creating the swept import's alert is added by
+   CIW-05. If the
+   database is unreachable at startup, the sweep is skipped with a warning
+   naming only the exception type and the app starts anyway (`/api/health`
+   reports `degraded`).
 
 ## On-call worker loop
 

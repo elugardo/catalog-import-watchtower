@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.routers import alerts, health, imports, products, vendors
 from app.schemas.query import QUERY_RULES
@@ -61,6 +62,72 @@ def error_response(
     )
 
 
+class UnhandledErrorMiddleware:
+    """Answer an exception that escapes a request with the stable 500, and log it by type only.
+
+    Starlette's `ServerErrorMiddleware` always re-raises, and uvicorn then logs
+    `Exception in ASGI application` with the full traceback, whose chained
+    database error quotes row values (issue #40). This layer sits inside it
+    and swallows the exception instead: one ERROR line with the class name,
+    the method, the route template and the import id when the route has one.
+    Never the message, a traceback or SQL (AGENTS.md -> Rules).
+    """
+
+    def __init__(self, app: ASGIApp, templates: dict[int, str]) -> None:
+        self.app = app
+        self.templates = templates
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as exc:  # noqa: BLE001 - the last stop before the server
+            log.error(
+                "unhandled %s in %s",
+                type(exc).__name__,
+                _describe_request(scope, self.templates),
+            )
+        else:
+            return
+        # Sent outside the `except` block on purpose: if sending fails (the
+        # client went away), the new exception must not carry the original one
+        # as its `__context__`, or uvicorn would print that chained traceback.
+        if not response_started:
+            response = error_response(500, "INTERNAL_ERROR", "internal error")
+            await response(scope, receive, send)
+
+
+def _describe_request(scope: Scope, templates: dict[int, str]) -> str:
+    """`<METHOD> <route template>`, plus `import_id=<n>` on `/api/imports/{id}`.
+
+    The template, not the requested path, so nothing the client typed is logged.
+    FastAPI leaves the router's own route in the scope, whose path lacks the
+    `/api` prefix; `templates` maps those routes (by identity) to the full one.
+    """
+    route = scope.get("route")
+    template = templates.get(id(route)) or getattr(route, "path", None) or "(no route)"
+    described = f"{scope.get('method', '?')} {template}"
+    import_id = str((scope.get("path_params") or {}).get("id", ""))
+    if (
+        template.startswith(f"{API_PREFIX}/imports/")
+        and import_id.isascii()
+        and import_id.isdigit()
+    ):
+        described += f" import_id={import_id}"
+    return described
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Catalog Import Watchtower",
@@ -71,8 +138,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    templates: dict[int, str] = {}
     for module in (health, imports, vendors, products, alerts):
         app.include_router(module.router, prefix=API_PREFIX)
+        for route in module.router.routes:
+            templates[id(route)] = API_PREFIX + getattr(route, "path", "")
 
     def openapi_without_422() -> dict[str, Any]:
         """The generated schema, minus the 422 FastAPI lists on every route with parameters.
@@ -138,13 +208,7 @@ def create_app() -> FastAPI:
             return error_response(400, "INVALID_QUERY", message, details)
         return error_response(400, "INVALID_FIELD", "request validation failed", details)
 
-    @app.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
-        # Without this, Starlette answers a crash with `text/plain "Internal Server
-        # Error"`, outside the one error shape. The exception is still re-raised to
-        # the server log by Starlette after this response is sent; the message here
-        # stays generic so nothing internal leaks to the client.
-        return error_response(500, "INTERNAL_ERROR", "internal error")
+    app.add_middleware(UnhandledErrorMiddleware, templates=templates)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> Response:

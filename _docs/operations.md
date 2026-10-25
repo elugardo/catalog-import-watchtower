@@ -70,6 +70,20 @@ names and queries:
   and where relevant `import_id`, `attempt_number`, `alert_id`. The attempt's
   `trace_id` is also stored in `import_attempts.trace_id`, so the detail page
   can link to the trace.
+
+  **Errors are logged by exception type, already before CIW-09.1.** A failed
+  attempt logs its `import_id`, attempt number, code and the exception's
+  class name. An exception that escapes a request is logged once, at ERROR,
+  as `unhandled <ExceptionClass> in <METHOD> <route template>` (plus
+  `import_id=<n>` on `/api/imports/{id}`), and the client gets the stable
+  500. No error line carries a traceback, an exception message (a Postgres
+  message or its `DETAIL` can quote row values) or SQL parameters; the
+  engine in `app/db.py`, shared by `app` and `oncall-agent`, is built with
+  `hide_parameters=True`, which is not configurable. uvicorn's
+  `Exception in ASGI application` traceback therefore never appears (if the
+  response had already started, uvicorn adds its own one-line
+  `ASGI callable returned without completing response`, also type-free).
+  Uvicorn access lines (method, path, status) stay.
 - **Metrics:** `catalog_import_attempts_total{outcome,error_category}`,
   `catalog_import_duration_seconds` (histogram),
   `catalog_products_upserted_total`, `catalog_import_alerts_open` (gauge),
@@ -213,6 +227,6 @@ Without this, the On-Call Agent rubric row is not earned.
 | alert stays `OPEN` forever | `GET /api/health` → `agent_enabled`; if `true`, `docker compose logs oncall-agent` for the idle line (key missing) | set `AGENT_ENABLED=true` and the key in `.env`; restart `oncall-agent` |
 | alert stuck `IN_PROGRESS` | worker logs by `alert_id` | the stale-claim timeout (5 min) returns it to `OPEN`; otherwise `docker compose exec app python -m app.oncall tools mark_needs_attention <alert_id> "<reason>"` |
 | retry refused (no-op) | `GET /api/imports/{id}` attempts and failure code | by design for validation errors and after two attempts; operator uploads a corrected file |
-| import stuck `PROCESSING` | app logs around the crash (a 500 on `POST /api/imports` leaves one) | the startup sweep marks it `FAILED` / `INTERNAL_ERROR` on the next start and raises its alert (`INTERNAL_ERROR (found PROCESSING at startup)`; an existing alert keeps its status); `docker compose restart app` |
+| import stuck `PROCESSING` | `docker compose logs app`: a 500 on `POST /api/imports` leaves `unhandled <ExceptionClass> in POST /api/imports`, and when the failure write was what failed, the line before it is `import <id> attempt <n> failed: <code> (<ExceptionClass>)`, which names the import (type-only lines, no traceback) | the startup sweep marks it `FAILED` / `INTERNAL_ERROR` on the next start and raises its alert (`INTERNAL_ERROR (found PROCESSING at startup)`; an existing alert keeps its status); `docker compose restart app` |
 | no traces in Grafana | otel-lgtm logs; `OTEL_EXPORTER_OTLP_ENDPOINT` | fix endpoint; `docker compose restart app oncall-agent` |
 | deploy green but site down | provider health check, migrations job log | roll back to previous tag (above) |

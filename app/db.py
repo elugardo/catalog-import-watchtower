@@ -31,9 +31,18 @@ class Base(DeclarativeBase):
 
 @lru_cache
 def get_engine() -> Engine:
+    """The one engine of the process; the app and `python -m app.oncall` both use it.
+
+    `hide_parameters=True` keeps bound parameters (SKUs, names, prices) out of
+    the text of every statement error and out of SQLAlchemy's own logging.
+    It is not configurable (AGENTS.md -> Rules: no catalog content in logs).
+    The driver's message can still quote row values, so an exception message
+    is never logged either (`app.main`, `app.services.importer`).
+    """
     settings = get_settings()
     return create_engine(
         settings.database_url,
+        hide_parameters=True,
         pool_pre_ping=True,
         connect_args={"connect_timeout": settings.database_connect_timeout_seconds},
     )

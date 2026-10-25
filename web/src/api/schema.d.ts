@@ -211,7 +211,7 @@ export interface components {
             status: components["schemas"]["AttemptStatus"];
             error_code: components["schemas"]["FailureCode"] | null;
             /** @description OpenTelemetry trace id of this attempt (32 hex characters). */
-            trace_ident: string | null;
+            trace_id: string | null;
             /**
              * Format: date-time
              * @description UTC, ISO-8601 with a Z suffix.

@@ -22,7 +22,12 @@ from app.services.importer import import_summary
 
 
 def _page(session: Session, query: Select[Any], limit: int, offset: int) -> tuple[list[Any], int]:
-    """The rows of one page of `query` and the count of all its rows."""
+    """The rows of one page of `query` and the count of all its rows.
+
+    Both statements run in one `REPEATABLE READ` snapshot, so an import that
+    commits between them cannot make `total` disagree with `items`.
+    """
+    session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
     total = session.execute(
         select(func.count()).select_from(query.order_by(None).subquery())
     ).scalar_one()

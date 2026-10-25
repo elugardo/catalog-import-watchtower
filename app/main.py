@@ -125,13 +125,15 @@ def create_app() -> FastAPI:
             {"loc": [str(part) for part in error.get("loc", ())], "message": str(error.get("msg"))}
             for error in errors
         ]
-        query_names = [
-            str(error["loc"][1])
-            for error in errors
-            if error.get("loc", ())[:1] == ("query",) and len(error["loc"]) > 1
-        ]
-        if query_names:
-            name = query_names[0]
+        name = next(
+            (
+                str(error["loc"][1])
+                for error in errors
+                if error.get("loc", ())[:1] == ("query",) and len(error["loc"]) > 1
+            ),
+            None,
+        )
+        if name is not None:
             message = QUERY_RULES.get(name, f"query parameter {name} is invalid")
             return error_response(400, "INVALID_QUERY", message, details)
         return error_response(400, "INVALID_FIELD", "request validation failed", details)

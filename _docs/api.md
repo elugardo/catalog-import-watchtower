@@ -7,9 +7,10 @@ Pydantic response models in `app/schemas/` to its property names. The
 generated-schema drift check, `tests/unit/test_openapi_drift.py` (no
 database, part of `uv run pytest tests/unit`), compares the app's
 `/api/openapi.json` with the YAML for every operation: path and method,
-parameters (name, location, `required`), response status codes, the
-property names of every response body (4xx included, `$ref` and `allOf`
-resolved) and the upload request body. The generated schema lists no 422
+parameters (name, location, `required`, `minimum`, `maximum`,
+`default`), response status codes, the property names of every response
+body (4xx included, `$ref` and `allOf` resolved) and the upload request
+body. The generated schema lists no 422
 and no `HTTPValidationError` (`app/main.py` removes them). The frontend's
 client types are derived from the YAML in CIW-04.1 (#5). This file holds the
 conventions and the error catalogue that the YAML alone does not explain. If

@@ -2,10 +2,11 @@
 
 No database: `create_app().openapi()` only walks the routes. For every
 operation of either side, the test compares the path and method pairs, the
-parameters (name, location, `required`), the response status codes, the
-property names of every response body (every status, `$ref`, `allOf` and
-nullable `anyOf` resolved, nested objects and list items included) and the
-media type and property names of the upload request body.
+parameters (name, location, `required`, `minimum`, `maximum`, `default`),
+the response status codes, the property names of every response body
+(every status, `$ref`, `allOf` and nullable `anyOf` resolved, nested
+objects and list items included) and the media type and property names of
+the upload request body.
 
 Component names differ between the two (`Page_VendorOut_` against
 `VendorList`), so bodies are compared by structure after resolution, not by
@@ -84,9 +85,22 @@ def operations(document: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]
     }
 
 
-def parameters(operation: dict[str, Any], document: dict[str, Any]) -> set[tuple[str, str, bool]]:
+def _bounds(schema: dict[str, Any], document: dict[str, Any]) -> tuple[Any, Any, Any]:
+    """`minimum`, `maximum` and `default` of a parameter schema, a nullable `anyOf` reduced."""
+    schema = _resolve(schema, document)
+    options = [o for o in schema.get("anyOf", []) if _resolve(o, document).get("type") != "null"]
+    inner = _resolve(options[0], document) if len(options) == 1 else schema
+    return (inner.get("minimum"), inner.get("maximum"), schema.get("default"))
+
+
+def parameters(operation: dict[str, Any], document: dict[str, Any]) -> set[tuple[Any, ...]]:
     return {
-        (p["name"], p["in"], bool(p.get("required", False)))
+        (
+            p["name"],
+            p["in"],
+            bool(p.get("required", False)),
+            *_bounds(p.get("schema", {}), document),
+        )
         for p in (_resolve(p, document) for p in operation.get("parameters", []))
     }
 

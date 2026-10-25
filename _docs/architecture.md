@@ -57,7 +57,7 @@ app/
     importer.py        transaction: validate, inject, upsert, attempts, status; startup sweep; import detail
     vendors.py         vendor find-or-create (ON CONFLICT DO NOTHING + select)
     lists.py           read-only: the four list queries (newest first, id DESC ties, LIMIT/OFFSET, count)
-    alerts.py          create / claim / transition alerts, stale-claim reset
+    alerts.py          failure-alert create-or-update and the five reasons (issue 05); claim / transition alerts, stale-claim reset (issue 08)
     agent_tools.py     the six guarded tool functions, each writes its audit row
   routers/             imports, vendors, products, alerts, health
   telemetry.py         OTel setup, metrics, span helpers
@@ -126,13 +126,29 @@ The tables and enums are spec §6. On top of it:
    `attempt_number`, then:
    1. parses and validates the whole file (`csv_validation`, pure);
    2. on any validation error: stores the first 20 errors and the total,
-      sets `FAILED` / `VALIDATION_ERROR`, creates the alert, marks the
-      attempt `FAILED`; no product writes;
-   3. opens the upsert transaction; if `inject_transient_failure` and
-      *n* = 1 raises the synthetic `TRANSIENT_STORAGE_TIMEOUT` before any
-      write; a real `OperationalError` here maps to the same code, anything
-      else to `INTERNAL_ERROR`; on failure: rollback, attempt `FAILED`,
-      import `FAILED` with the code, alert created (or kept);
+      sets `FAILED` / `VALIDATION_ERROR`, marks the attempt `FAILED` and
+      writes the alert, all in one short transaction; no product writes.
+      The injection flag is not looked at, so validation always wins;
+   3. opens the upsert transaction; if the persisted
+      `inject_transient_failure` is true and *n* = 1, raises the synthetic
+      `TRANSIENT_STORAGE_TIMEOUT` (`importer.InjectedTransientFailure`) as
+      its first statement, before any product write; a real
+      `OperationalError` here maps to the same code, anything else to
+      `INTERNAL_ERROR`; on failure: rollback, then one short transaction
+      sets the attempt `FAILED`, the import `FAILED` with the code, and
+      writes the alert. A `FAILED` import therefore never exists without
+      its alert. If that failure write raises too, the request answers 500
+      and the import stays `PROCESSING` until the startup sweep (step 5).
+
+      The alert write is `app/services/alerts.py`: one `INSERT … ON CONFLICT
+      (import_id) DO UPDATE`, so concurrent writers on one import leave one
+      row and never raise. A new alert is `OPEN` with `claimed_at` null and
+      `created_at` = `updated_at`. An import that already has an alert (a
+      failed attempt 2) keeps that row: `reason` and `updated_at`
+      (`clock_timestamp()`, set explicitly) change, `status`, `claimed_at`
+      and `created_at` do not, because the worker owns every status change
+      after `OPEN`. The reason is one of five fixed strings
+      (`operations.md` -> *Alerting*);
    4. otherwise upserts every row by `(vendor_id, normalized_sku)` with one
       `INSERT … ON CONFLICT (vendor_id, normalized_sku) DO UPDATE` that
       updates unconditionally and sets `updated_at = now()` itself (the
@@ -140,8 +156,9 @@ The tables and enums are spec §6. On top of it:
       `SUCCEEDED`, sets `COMPLETED`, `product_count`, `completed_at`, clears
       `failure_code`, and commits all of that in the one upsert transaction,
       so products and the `COMPLETED` transition land together or not at
-      all. Until CIW-05, any exception here is `INTERNAL_ERROR` and is
-      logged by exception type only.
+      all. A success never touches the import's alert (resolving it is the
+      worker's `resolve_alert`). Exceptions are logged by exception type
+      only, never by message.
 
    The importer stores the first 20 of the validator's errors (the validator
    itself stops at 1 000) and the total in `validation_error_count`.
@@ -159,8 +176,12 @@ The tables and enums are spec §6. On top of it:
    `completed_at` null, and sets its `RUNNING` attempt to `FAILED` /
    `INTERNAL_ERROR` with `finished_at` = the sweep time, so the swept import
    has an end time (spec §6: a `FAILED` import's end time is its last
-   attempt's `finished_at`). Creating the swept import's alert is added by
-   CIW-05. If the
+   attempt's `finished_at`). In the same transaction it writes each swept
+   import's alert with the sweep reason; an import that already has one
+   (a crashed attempt 2) keeps it under the update rule of step 2.iii. Only
+   `PROCESSING` imports are selected, so a second start changes nothing and
+   a `FAILED` import left without an alert by an earlier build is never
+   backfilled. If the
    database is unreachable at startup, the sweep is skipped with a warning
    naming only the exception type and the app starts anyway (`/api/health`
    reports `degraded`). This covers the app process. The image's entrypoint

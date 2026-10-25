@@ -41,14 +41,16 @@ lands; whoever creates one updates this section in the same PR.
 <repo root>/
 ├── AGENTS.md, CLAUDE.md, README.md
 ├── .github/workflows/     ci.yml (PR checks); deploy-dev.yml, promote-prod.yml (issue 10)
-├── openapi.yaml           API contract, written before the code       (issue 02)
+├── openapi.yaml           API contract (OpenAPI 3.1), written before the code; validated in CI
 ├── compose.yaml           app, oncall-agent, db, otel-lgtm; one command; every ${VAR} has a default
 ├── Dockerfile, .dockerignore   multi-stage: node builds web/, then the Python image serving SPA + API; APP_VERSION build arg
 ├── .env.example           every variable, no secrets
 ├── pyproject.toml, uv.lock, .python-version   one package for app and worker; `[tool.uv] package = false`
-├── alembic.ini, alembic/  migrations; env.py reads DATABASE_URL from app.settings; first revision in issue 02
-├── app/                   FastAPI package: main.py, settings.py, db.py, routers/health.py; app/oncall/ is the worker (idle stub; loop in issue 08); app/static/ is the built SPA (git-ignored)
-├── tests/                 conftest.py, unit/ (no database), integration/ (real Postgres on localhost:5432); oncall/ (issue 08)
+├── alembic.ini, alembic/  migrations; env.py reads DATABASE_URL from app.settings and imports app.models; versions/ holds the first revision (the six tables, issue 02); later revisions are additive-only
+├── app/                   FastAPI package: main.py, settings.py, db.py (engine, Base with the constraint naming convention), routers/health.py; app/oncall/ is the worker (idle stub; loop in issue 08); app/static/ is the built SPA (git-ignored)
+│   ├── models/            SQLAlchemy models of the six tables (catalog.py, imports.py, incidents.py) and enums.py (the CHECK values)
+│   └── schemas/           Pydantic v2 response models mirroring openapi.yaml (a unit test keeps them in step)
+├── tests/                 conftest.py, unit/ (no database; contract tests), integration/ (real Postgres on localhost:5432, migrated by Alembic; schema, constraints, migration round trip); oncall/ (issue 08)
 ├── web/                   React 18 + TypeScript + Vite; Vitest + Testing Library in src/__tests__/; `npm run build` -> dist/, copied into app/static by the Dockerfile
 ├── observability/         otel-lgtm config + Grafana provisioning, all in-repo (issue 09)
 ├── fixtures/              valid.csv, update.csv, invalid.csv           (issue 03)
@@ -69,7 +71,11 @@ docker compose up --build                             # app :8000 (SPA + API), d
 docker compose up --build -d --wait                   # same, detached; returns once /api/health reports db: ok
 docker compose down -v                                # stop and drop the data volume
 uv run pytest tests/unit                              # backend unit tests; no database needed
-uv run pytest tests/integration                       # backend integration tests against the Compose db (localhost:5432)
+uv run pytest tests/integration                       # backend integration tests against the Compose db (localhost:5432); runs `alembic upgrade head` first
+uv run openapi-spec-validator openapi.yaml            # validate the OpenAPI 3.1 contract (also a CI step)
+uv run alembic upgrade head                           # apply migrations to DATABASE_URL (the app entrypoint does this too)
+uv run alembic check                                  # fails if the models and the migrations differ
+uv run alembic revision --autogenerate -m "<what>"    # draft a new, additive-only revision; review it before committing
 npm --prefix web test                                 # frontend tests (Vitest + Testing Library)
 <single test command>                                 # all of the above in one go (issue 06)
 docker compose exec app python -m app.oncall tools <tool> [args]   # run one agent tool by hand (issue 08)

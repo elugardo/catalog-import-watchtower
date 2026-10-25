@@ -1,7 +1,16 @@
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
-import type { Health, Import, ImportDetail } from "../api/client";
+import type {
+  AgentAction,
+  Alert,
+  AlertListItem,
+  Attempt,
+  Health,
+  Import,
+  ImportDetail,
+  Product,
+} from "../api/client";
 import { App, ROUTER_FUTURE } from "../App";
 
 // Test helpers: `fetch` is always stubbed (no network). Not a test file itself.
@@ -66,4 +75,74 @@ export function anImport(overrides: Partial<Import> = {}): Import {
 
 export function anImportDetail(overrides: Partial<ImportDetail> = {}): ImportDetail {
   return { ...anImport(), attempts: [], alert: null, agent_actions: [], ...overrides };
+}
+
+export function anAttempt(overrides: Partial<Attempt> = {}): Attempt {
+  return {
+    number: 1,
+    status: "SUCCEEDED",
+    error_code: null,
+    trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
+    started_at: "2026-10-24T12:00:00Z",
+    finished_at: "2026-10-24T12:00:01Z",
+    ...overrides,
+  };
+}
+
+export function anAlert(overrides: Partial<Alert> = {}): Alert {
+  return {
+    id: 1,
+    status: "OPEN",
+    reason: "import failed: VALIDATION_ERROR",
+    claimed_at: null,
+    created_at: "2026-10-24T12:00:02Z",
+    updated_at: "2026-10-24T12:00:02Z",
+    ...overrides,
+  };
+}
+
+export function anAlertListItem(overrides: Partial<AlertListItem> = {}): AlertListItem {
+  return {
+    ...anAlert(),
+    import_id: 2,
+    import_status: "FAILED",
+    failure_code: "VALIDATION_ERROR",
+    vendor_display_name: "Sample Furnishings",
+    filename: "invalid.csv",
+    ...overrides,
+  };
+}
+
+export function anAction(overrides: Partial<AgentAction> = {}): AgentAction {
+  return {
+    id: 1,
+    action: "RUN_STARTED",
+    tool_name: null,
+    reason_summary: null,
+    result: null,
+    created_at: "2026-10-24T12:00:03Z",
+    ...overrides,
+  };
+}
+
+export function aProduct(overrides: Partial<Product> = {}): Product {
+  return {
+    id: 1,
+    vendor_id: 1,
+    sku: "SF-001",
+    name: "Oak chair",
+    price_cents: 14999,
+    quantity: 8,
+    updated_at: "2026-10-24T12:00:01Z",
+    ...overrides,
+  };
+}
+
+/** A promise with its resolve handle, to hold a stubbed response back. */
+export function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }

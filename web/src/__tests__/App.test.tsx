@@ -1,6 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { json, renderAt, stubFetch } from "./helpers";
+import { anImportDetail, json, renderAt, stubFetch } from "./helpers";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -54,8 +54,15 @@ describe("App shell", () => {
     expect(await screen.findByTestId("health-unreachable")).toHaveTextContent("API unreachable");
   });
 
-  it("renders placeholders naming CIW-04.2 and a not-found page", async () => {
-    stubFetch({});
+  it("routes to the Dashboard, Products and Import detail pages, and a not-found page", async () => {
+    const empty = () => json({ items: [], total: 0 });
+    const fetchMock = stubFetch({
+      "GET /api/imports?limit=100": empty,
+      "GET /api/alerts?limit=100": empty,
+      "GET /api/vendors?limit=100": empty,
+      "GET /api/products?limit=50": empty,
+      "GET /api/imports/12": () => json(anImportDetail({ id: 12 })),
+    });
 
     for (const [path, heading] of [
       ["/", "Dashboard"],
@@ -64,10 +71,11 @@ describe("App shell", () => {
     ]) {
       const { unmount } = renderAt(path);
       expect(screen.getByRole("heading", { level: 2, name: heading })).toBeInTheDocument();
-      expect(screen.getByText(/CIW-04\.2 \(#6\)/)).toBeInTheDocument();
       await screen.findByTestId("health-version");
       unmount();
     }
+    // One health request per mount of the shell, however many pages read agent_enabled.
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/health")).toHaveLength(3);
 
     renderAt("/nope");
     await screen.findByTestId("health-version");

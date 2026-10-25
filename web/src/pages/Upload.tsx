@@ -2,7 +2,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { createImport, errorMessage, type ImportDetail } from "../api/client";
 import { ImportStatus } from "../components/ImportStatus";
-import { errorCountText } from "../format";
+import { ValidationErrors } from "../components/ValidationErrors";
 
 // Spec F1 + the Upload half of F4. The server is the one source of the upload
 // rules (vendor name, file type, size, encoding): nothing here blocks a submit,
@@ -107,8 +107,6 @@ export function Upload() {
 }
 
 function ImportResult({ detail }: { detail: ImportDetail }) {
-  const shown = detail.validation_errors.length;
-  const total = detail.validation_error_count;
   return (
     <section className="card" aria-labelledby="result-heading" data-testid="import-result">
       <h2 id="result-heading">Import result</h2>
@@ -133,18 +131,7 @@ function ImportResult({ detail }: { detail: ImportDetail }) {
         )}
       </dl>
 
-      {total > 0 && (
-        <div className="validation">
-          <p>{total > shown ? `showing ${shown} of ${total} errors` : errorCountText(total)}</p>
-          <ul aria-label="Validation errors">
-            {detail.validation_errors.map((error, index) => (
-              <li key={index}>
-                line {error.line}, {error.column}: {error.message}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <ValidationErrors errors={detail.validation_errors} count={detail.validation_error_count} />
 
       <p>
         <Link to={`/imports/${detail.id}`}>View import {detail.id}</Link>

@@ -19,9 +19,13 @@ to).
 
 ## 1. Claim
 
-Take the alert `OPEN → IN_PROGRESS`. If that fails, someone else has it: stop.
-Record `run_started` with who or what is handling it (worker: provider and
-model; human: name).
+Worker: take the alert `OPEN → IN_PROGRESS`; if that fails, someone else has
+it: stop. Record `run_started` with provider and model. Human: there is no
+claim through the CLI; if the alert is `IN_PROGRESS`, the worker owns it, so
+wait for the stale-claim timeout or work only through the guarded tools. On
+an `OPEN` alert a human can read, retry and resolve, but
+`mark_needs_attention` is refused until the alert is claimed. Write your name
+and the time in your notes.
 
 ## 2. Read the incident
 
@@ -32,7 +36,7 @@ Note:
 
 - import id, import status, failure code
 - attempt count and the per-attempt list from `get_import_attempts`
-- alert created/updated times
+- import created/completed times
 - the trace id of the failed attempt
 
 Do not fetch the CSV, the vendor, or the products. They are not needed to

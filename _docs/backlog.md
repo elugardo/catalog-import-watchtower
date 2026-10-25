@@ -74,3 +74,5 @@ Folded or closed outside the table: #18 (pin otel-lgtm) was folded into #13
 and closed; #22 was a docs follow-up of #3, closed by PR #23. #27 (spec
 wording for the `COMPLETED` transition, a QA follow-up of #4) was closed by
 the docs PR; #28 (a crash during attempt 2) was folded into #10 and closed.
+#31 (the integration suite colliding with the `Sample Furnishings` demo
+vendor, a QA follow-up of #24) was folded into #8 and closed.

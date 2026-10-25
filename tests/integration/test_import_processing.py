@@ -148,7 +148,7 @@ def test_scenario_3_invalid_file_changes_nothing(client, migrated_engine, ns):
     assert (error["line"], error["column"]) == (4, "quantity")
     assert error["message"]
     assert body["validation_error_count"] == 1
-    assert body["alert"] is None
+    assert body["alert"]["status"] == "OPEN"  # the alert itself: test_failure_alerts.py
     after = products_snapshot(migrated_engine, vendor_id)
     assert after == before
     skus = {row["normalized_sku"]: row for row in after}
@@ -301,12 +301,12 @@ def test_runtime_failure_in_the_upsert_rolls_everything_back(
     assert client.get(f"/api/imports/{body['id']}").json() == body
 
 
-def test_injection_flag_is_stored_and_changes_nothing_yet(client, migrated_engine, ns):
+def test_injection_flag_is_stored(client, migrated_engine, ns):
     body = upload(client, ns.name(), VALID, inject="true")
 
     assert body["inject_transient_failure"] is True
     assert import_row(migrated_engine, body["id"])["inject_transient_failure"] is True
-    assert body["status"] == "COMPLETED"
+    assert body["status"] == "FAILED"  # the injector itself: test_failure_injection.py
     assert body["attempt_count"] == 1
 
 
@@ -320,6 +320,7 @@ def test_logs_carry_no_catalog_content(client, caplog, monkeypatch, ns):
     upload(client, vendor, VALID)
     upload(client, vendor, UPDATE, filename="update.csv")
     upload(client, vendor, INVALID, filename="invalid.csv")
+    upload(client, vendor, VALID, inject="true")
 
     def failing_upsert(session, vendor_id, rows):
         raise Boom(f"failure quoting {rows[0]['sku']} {rows[0]['name']}")

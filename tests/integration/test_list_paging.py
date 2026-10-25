@@ -26,12 +26,12 @@ def rows(client, migrated_engine, ns) -> dict[str, int]:
     failed = post_import(
         client, ns.name("Vendor B"), fixture_bytes("invalid.csv"), filename="invalid.csv"
     ).json()
-    for import_id in (valid["id"], failed["id"]):
-        sql(
-            migrated_engine,
-            "INSERT INTO alerts (import_id, status, reason) VALUES (:i, 'OPEN', 'test')",
-            i=import_id,
-        )
+    assert failed["alert"] is not None  # written with the failure (#7)
+    sql(
+        migrated_engine,
+        "INSERT INTO alerts (import_id, status, reason) VALUES (:i, 'RESOLVED', 'test')",
+        i=valid["id"],
+    )
     return {"vendor_id": valid["vendor"]["id"]}
 
 

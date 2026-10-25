@@ -180,6 +180,34 @@ describe("Dashboard", () => {
     expect(screen.getByRole("link", { name: "All imports" })).toHaveAttribute("href", "/imports");
   });
 
+  it("says the incidents cover the newest 100 when the alerts total is above 100", async () => {
+    const alerts = Array.from({ length: 100 }, (_, index) =>
+      anAlertListItem({ id: 137 - index, filename: `a${137 - index}.csv`, status: index % 2 ? "RESOLVED" : "OPEN" }),
+    );
+    const fetchMock = stub({ alerts: () => json({ items: alerts, total: 137 }) });
+    const { unmount } = renderAt("/");
+
+    expect(await screen.findAllByText("incidents cover the newest 100 of 137 alerts")).toHaveLength(1);
+    await screen.findByTestId("health-version");
+    const urls = apiCalls(fetchMock).map(([input]) => String(input));
+    expect(urls.filter((url) => url.startsWith("/api/alerts"))).toEqual(["/api/alerts?limit=100"]);
+    unmount();
+
+    stub({ alerts: () => json({ items: alerts, total: 100 }) });
+    renderAt("/");
+    await screen.findByRole("table", { name: "Open incidents" });
+    expect(screen.queryByText(/incidents cover/)).not.toBeInTheDocument();
+  });
+
+  it("shows only the error text, not the incidents sentence, when the alerts request fails", async () => {
+    stub({ alerts: () => json({ code: "INTERNAL_ERROR", message: "internal error", details: [] }, 500) });
+
+    renderAt("/");
+
+    await waitFor(() => expect(screen.getAllByText("INTERNAL_ERROR: internal error")).toHaveLength(2));
+    expect(screen.queryByText(/incidents cover/)).not.toBeInTheDocument();
+  });
+
   it("shows no more than 10 recent incidents", async () => {
     const alerts = Array.from({ length: 12 }, (_, index) =>
       anAlertListItem({ id: 12 - index, filename: `r${12 - index}.csv`, status: index % 2 ? "RESOLVED" : "NEEDS_ATTENTION" }),

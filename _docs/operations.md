@@ -98,6 +98,43 @@ Two layers, both required:
    ends `FAILED`. It is the user-impact signal, it is shown in the UI, and
    the worker's poll is the only thing that wakes on it. This exists without
    any observability stack.
+
+   It is written in the same short transaction that sets the import
+   `FAILED` (validation, injected or real storage failure, unexpected
+   error, and the startup sweep), so a `FAILED` import never exists
+   without one. One row per import (`alerts.import_id` is unique). A new
+   alert is `OPEN`, `claimed_at` null, `created_at` = `updated_at`.
+
+   **Update rule.** If an import that already has an alert fails again
+   (a failed attempt 2, or the sweep picking up a crashed attempt 2), that
+   same row is updated: `reason` is replaced and `updated_at` advances;
+   `status`, `claimed_at` and `created_at` are kept, because the worker
+   owns every status change after `OPEN`. A success never touches the
+   alert; resolving it is the worker's `resolve_alert`. No endpoint
+   creates, acknowledges or resolves an alert. Imports that failed before
+   this existed are not backfilled.
+
+   **Reasons.** The `reason` is exactly one of these fixed, content-free
+   strings (`<n>` is the attempt number, `<k>` the stored
+   `validation_error_count`), at most 200 characters, never quoting a CSV
+   cell, a name, a filename, an exception message or the raised exception's type (the fixed word `OperationalError` names the class matched):
+
+   | Failure | `reason` |
+   |---|---|
+   | validation | `VALIDATION_ERROR on attempt <n>: 1 validation error` (k = 1) or `VALIDATION_ERROR on attempt <n>: <k> validation errors` |
+   | injected fault | `TRANSIENT_STORAGE_TIMEOUT on attempt <n> (synthetic demo fault)` |
+   | real `OperationalError` | `TRANSIENT_STORAGE_TIMEOUT on attempt <n> (database OperationalError)` |
+   | any other exception | `INTERNAL_ERROR on attempt <n> (unexpected error)` |
+   | startup sweep | `INTERNAL_ERROR (found PROCESSING at startup)` |
+
+   **The failure injector is synthetic.** The Upload page's checkbox
+   *Demo: fail first attempt with transient storage timeout* stores
+   `inject_transient_failure` on the import; attempt 1 of that import, and
+   only of that import, then fails with `TRANSIENT_STORAGE_TIMEOUT` after
+   validation has passed and before any product is written. It is not a
+   real storage outage and there is no environment variable for it. Each
+   alert write logs one line with `alert_id`, `import_id`, the code and the
+   attempt number only.
 2. **The visible alert** is a Grafana alert rule on
    `catalog_import_alerts_open > 0`, provisioned from
    `observability/grafana/provisioning/alerting/`, with a dashboard link in
@@ -176,6 +213,6 @@ Without this, the On-Call Agent rubric row is not earned.
 | alert stays `OPEN` forever | `GET /api/health` → `agent_enabled`; if `true`, `docker compose logs oncall-agent` for the idle line (key missing) | set `AGENT_ENABLED=true` and the key in `.env`; restart `oncall-agent` |
 | alert stuck `IN_PROGRESS` | worker logs by `alert_id` | the stale-claim timeout (5 min) returns it to `OPEN`; otherwise `docker compose exec app python -m app.oncall tools mark_needs_attention <alert_id> "<reason>"` |
 | retry refused (no-op) | `GET /api/imports/{id}` attempts and failure code | by design for validation errors and after two attempts; operator uploads a corrected file |
-| import stuck `PROCESSING` | app logs around the crash | the startup sweep marks it `FAILED` / `INTERNAL_ERROR` on the next start; `docker compose restart app` |
+| import stuck `PROCESSING` | app logs around the crash (a 500 on `POST /api/imports` leaves one) | the startup sweep marks it `FAILED` / `INTERNAL_ERROR` on the next start and raises its alert (`INTERNAL_ERROR (found PROCESSING at startup)`; an existing alert keeps its status); `docker compose restart app` |
 | no traces in Grafana | otel-lgtm logs; `OTEL_EXPORTER_OTLP_ENDPOINT` | fix endpoint; `docker compose restart app oncall-agent` |
 | deploy green but site down | provider health check, migrations job log | roll back to previous tag (above) |

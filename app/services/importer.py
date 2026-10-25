@@ -5,9 +5,14 @@
 - `run_attempt` inserts the attempt as `RUNNING` (own transaction), validates
   the whole file, then either records `FAILED` / `VALIDATION_ERROR` with no
   product write, or upserts every row and marks the import `COMPLETED` in one
-  transaction. Any exception in that transaction rolls it back and the import
-  ends `FAILED` / `INTERNAL_ERROR` (CIW-05 adds the transient code and alerts).
-- `sweep_stuck_imports` is the startup crash recovery (step 5).
+  transaction. The synthetic failure injector raises at the start of that
+  transaction, before any product statement, on attempt 1 only. Any exception
+  in that transaction rolls it back: the injected fault and a real
+  `OperationalError` end `FAILED` / `TRANSIENT_STORAGE_TIMEOUT`, anything else
+  `FAILED` / `INTERNAL_ERROR`.
+- Every `FAILED` transition writes the import's alert in the same short
+  transaction (`app/services/alerts.py`); a success never touches the alert.
+- `sweep_stuck_imports` is the startup crash recovery (step 5), alert included.
 - `load_import_detail` is the read side of `GET /api/imports/{id}`;
   `import_summary` builds the `Import` fields it shares with `GET /api/imports`
   (`app/services/lists.py`).
@@ -23,12 +28,14 @@ from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.db import get_sessionmaker
 from app.models import AgentAction, Alert, Import, ImportAttempt, Product
 from app.schemas import ImportDetailOut
 from app.schemas.upload import UploadRequest
+from app.services import alerts
 from app.services.csv_validation import ProductRow, validate_csv
 from app.services.vendors import find_or_create_vendor
 
@@ -40,6 +47,14 @@ log = logging.getLogger(__name__)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 STORED_VALIDATION_ERRORS = 20
+
+
+class InjectedTransientFailure(Exception):
+    """The synthetic demo fault: the upload asked for a failed first attempt.
+
+    Not a real storage outage. Raised only inside the upsert transaction, before
+    any product statement, so the rollback has nothing to undo.
+    """
 
 
 def _session() -> Session:
@@ -71,6 +86,8 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
     """Process one attempt of an import whose row already exists. Never raises for bad data.
 
     `attempt_number` is 1 from the upload; the agent's retry (CIW-08.1) passes 2.
+    The injection flag is read from the persisted import row, never from a
+    setting, so an injected upload affects no other import.
     """
     with _session() as session:
         with session.begin():
@@ -81,12 +98,16 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
             session.flush()
             attempt_id = attempt.id
             row = session.execute(
-                select(Import.vendor_id, Import.csv_bytes).where(Import.id == import_id)
+                select(Import.vendor_id, Import.csv_bytes, Import.inject_transient_failure).where(
+                    Import.id == import_id
+                )
             ).one()
         vendor_id, csv_bytes = row.vendor_id, row.csv_bytes
+        inject = row.inject_transient_failure and attempt_number == 1
 
         result = validate_csv(csv_bytes)
         if result.errors:
+            # Validation wins over injection: the flag is never looked at here.
             with session.begin():
                 _finish(
                     session,
@@ -100,18 +121,26 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
                         "validation_error_count": result.error_count,
                     },
                 )
+                alert_id = alerts.record_failure_alert(
+                    session,
+                    import_id,
+                    alerts.validation_reason(attempt_number, result.error_count),
+                )
             log.info(
                 "import %d attempt %d failed: VALIDATION_ERROR, %d errors",
                 import_id,
                 attempt_number,
                 result.error_count,
             )
+            _log_alert(alert_id, import_id, "VALIDATION_ERROR", attempt_number)
             return
 
         try:
             # One transaction: every product row and the COMPLETED transition
             # commit together, or nothing does.
             with session.begin():
+                if inject:
+                    raise InjectedTransientFailure
                 _upsert_products(session, vendor_id, result.rows)
                 _finish(
                     session,
@@ -128,27 +157,55 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
                     },
                 )
         except Exception as exc:  # noqa: BLE001 - every runtime failure ends the attempt
+            code, reason = _classify(exc, attempt_number)
             log.error(
-                "import %d attempt %d failed: INTERNAL_ERROR (%s)",
+                "import %d attempt %d failed: %s (%s)",
                 import_id,
                 attempt_number,
+                code,
                 type(exc).__name__,
             )
+            # If this write raises too, the request answers 500 and the import
+            # stays PROCESSING with no alert until the next startup sweep.
             with session.begin():
                 _finish(
                     session,
                     import_id,
                     attempt_id,
                     succeeded=False,
-                    code="INTERNAL_ERROR",
+                    code=code,
                     import_values={"row_count": result.row_count},
                 )
+                alert_id = alerts.record_failure_alert(session, import_id, reason)
+            _log_alert(alert_id, import_id, code, attempt_number)
             return
     log.info(
         "import %d attempt %d completed: %d products",
         import_id,
         attempt_number,
         len(result.rows),
+    )
+
+
+def _classify(exc: Exception, attempt_number: int) -> tuple[str, str]:
+    """The failure code and alert reason for an exception in the upsert transaction.
+
+    Only the exception's class is looked at; its message is never used.
+    """
+    if isinstance(exc, InjectedTransientFailure):
+        return "TRANSIENT_STORAGE_TIMEOUT", alerts.injected_reason(attempt_number)
+    if isinstance(exc, OperationalError):
+        return "TRANSIENT_STORAGE_TIMEOUT", alerts.operational_reason(attempt_number)
+    return "INTERNAL_ERROR", alerts.internal_reason(attempt_number)
+
+
+def _log_alert(alert_id: int, import_id: int, code: str, attempt_number: int | None) -> None:
+    """The one log line per alert write: ids, the code and the attempt number only."""
+    if attempt_number is None:  # the startup sweep
+        log.warning("alert %d for import %d: %s (startup sweep)", alert_id, import_id, code)
+        return
+    log.warning(
+        "alert %d for import %d: %s on attempt %d", alert_id, import_id, code, attempt_number
     )
 
 
@@ -218,7 +275,11 @@ def sweep_stuck_imports() -> int:
     """Startup crash recovery: every `PROCESSING` import and its `RUNNING` attempt become
     `FAILED` / `INTERNAL_ERROR`. Returns the number of imports swept. Runs in `app` only.
 
-    Creating the alert for each swept import is CIW-05.
+    Each swept import gets its alert in the same transaction, with the sweep
+    reason; an import that already has one (a crashed attempt 2) keeps that row
+    under the update rule of `alerts.record_failure_alerts`. Only `PROCESSING`
+    imports are selected, so a `FAILED` import left without an alert by an
+    earlier build is never backfilled.
     """
     with _session() as session, session.begin():
         stuck = select(Import.id).where(Import.status == "PROCESSING")
@@ -227,21 +288,27 @@ def sweep_stuck_imports() -> int:
             .where(ImportAttempt.status == "RUNNING", ImportAttempt.import_id.in_(stuck))
             .values(status="FAILED", error_code="INTERNAL_ERROR", finished_at=func.now())
         )
-        swept = session.execute(
-            update(Import)
-            .where(Import.status == "PROCESSING")
-            .values(
-                status="FAILED",
-                failure_code="INTERNAL_ERROR",
-                product_count=None,
-                completed_at=None,
-            )
-            .returning(Import.id)
-        ).scalars()
-        count = len(list(swept))
-    if count:
-        log.warning("startup sweep marked %d stuck imports FAILED / INTERNAL_ERROR", count)
-    return count
+        swept = list(
+            session.execute(
+                update(Import)
+                .where(Import.status == "PROCESSING")
+                .values(
+                    status="FAILED",
+                    failure_code="INTERNAL_ERROR",
+                    product_count=None,
+                    completed_at=None,
+                )
+                .returning(Import.id)
+            ).scalars()
+        )
+        written = alerts.record_failure_alerts(
+            session, [(import_id, alerts.SWEEP_REASON) for import_id in sorted(swept)]
+        )
+    if swept:
+        log.warning("startup sweep marked %d stuck imports FAILED / INTERNAL_ERROR", len(swept))
+        for alert_id, import_id in written:
+            _log_alert(alert_id, import_id, "INTERNAL_ERROR", None)
+    return len(swept)
 
 
 def load_import_detail(import_id: int) -> ImportDetailOut | None:

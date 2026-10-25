@@ -1,6 +1,7 @@
 """`GET /api/alerts` (spec section 7), and all four lists on a database with no rows.
 
-Alerts are created by CIW-05 (#7); here they are inserted directly.
+The failed imports' alerts are the ones CIW-05 (#7) writes; their status, the
+shared `created_at` and the alert of the completed import are set directly.
 """
 
 import pytest
@@ -42,15 +43,16 @@ def three_alerts(client, migrated_engine, ns) -> dict[str, dict]:
         " VALUES (:i, 2, 'SUCCEEDED', now())",
         i=completed["id"],
     )
-    open_id, attention_id = (
-        row.id
-        for row in sql(
-            migrated_engine,
-            "INSERT INTO alerts (import_id, status, reason) VALUES"
-            " (:a, 'OPEN', 'test'), (:b, 'NEEDS_ATTENTION', 'test') RETURNING id",
-            a=failed_a["id"],
-            b=failed_b["id"],
-        )
+    # Both failures already have their OPEN alert (#7); B's is moved on and
+    # both are given one shared `created_at`, for the tie-break.
+    open_id, attention_id = failed_a["alert"]["id"], failed_b["alert"]["id"]
+    sql(
+        migrated_engine,
+        "UPDATE alerts SET created_at = now(),"
+        " status = CASE WHEN id = :b THEN 'NEEDS_ATTENTION' ELSE status END"
+        " WHERE id IN (:a, :b) RETURNING id",
+        a=open_id,
+        b=attention_id,
     )
     (resolved,) = sql(
         migrated_engine,

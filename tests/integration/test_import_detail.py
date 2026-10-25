@@ -52,7 +52,8 @@ def add_incident_rows(engine, import_id: int) -> None:
         alert_id = connection.execute(
             text(
                 "INSERT INTO alerts (import_id, status, reason) VALUES (:i, 'RESOLVED', 'test')"
-                " RETURNING id"
+                # A failed import already has its alert (#7); take that one over.
+                " ON CONFLICT (import_id) DO UPDATE SET status = EXCLUDED.status RETURNING id"
             ),
             {"i": import_id},
         ).scalar_one()

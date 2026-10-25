@@ -10,7 +10,8 @@ import { formatUtc } from "../format";
 // Spec F3 dashboard. Exactly one `GET /api/imports?limit=100` and one
 // `GET /api/alerts?limit=100` per visit (plus the shell's health check);
 // nothing pages further. Counts are computed over that one imports response
-// and say so when there are more imports than it holds.
+// and say so when there are more imports than it holds; the incidents say the
+// same, once, when there are more alerts than the alerts response holds.
 
 export const DASHBOARD_LIMIT = 100;
 const NEWEST_SHOWN = 10;
@@ -46,6 +47,11 @@ export function Dashboard() {
             items={alerts.data.items.filter((alert) => isOpenAlert(alert.status))}
             empty="No open incidents"
           />
+        )}
+        {alerts.kind === "ready" && alerts.data.total > DASHBOARD_LIMIT && (
+          <p className="muted small">
+            incidents cover the newest {alerts.data.items.length} of {alerts.data.total} alerts
+          </p>
         )}
       </section>
 

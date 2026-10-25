@@ -112,6 +112,27 @@ def products_snapshot(engine: Engine, vendor_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
 
 
+def all_products(engine: Engine) -> list[dict[str, Any]]:
+    """The products snapshot of #7: every product of every vendor, `updated_at` included."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT id, vendor_id, sku, normalized_sku, name, price_cents, quantity,"
+                " updated_at FROM products ORDER BY id"
+            )
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def alert_rows(engine: Engine, import_id: int) -> list[dict[str, Any]]:
+    """Every `alerts` row of the import (at most one, by the unique constraint)."""
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT * FROM alerts WHERE import_id = :i ORDER BY id"), {"i": import_id}
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
 def products_by_sku(engine: Engine, vendor_id: int) -> dict[str, dict[str, Any]]:
     return {row["normalized_sku"]: row for row in products_snapshot(engine, vendor_id)}
 

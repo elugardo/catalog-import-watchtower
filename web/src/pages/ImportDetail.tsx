@@ -15,6 +15,12 @@ import { formatUtc, formatUtcOrDash } from "../format";
 
 export function ImportDetail() {
   const { id = "" } = useParams();
+  // Keyed by id: going from one import straight to another remounts the page,
+  // so the previous import is never rendered under the new heading.
+  return <ImportDetailPage key={id} id={id} />;
+}
+
+function ImportDetailPage({ id }: { id: string }) {
   const state = useRequest(() => getImport(id), [id]);
 
   return (

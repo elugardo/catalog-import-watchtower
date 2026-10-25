@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { errorMessage, getHealth, type Health } from "../api/client";
+import { createContext, useContext, type ReactNode } from "react";
+import { getHealth, type Health } from "../api/client";
+import { useRequest } from "./useRequest";
 
 // The shell's one `GET /api/health` request, shared: the footer shows it and
 // the pages read `agent_enabled` from it, so no page asks for health again.
@@ -12,22 +13,13 @@ export type HealthState =
 const HealthContext = createContext<HealthState>({ kind: "loading" });
 
 export function HealthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<HealthState>({ kind: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    getHealth()
-      .then((health) => {
-        if (!cancelled) setState({ kind: "ready", health });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setState({ kind: "failed", message: errorMessage(error) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  const request = useRequest(getHealth, []);
+  const state: HealthState =
+    request.kind === "ready"
+      ? { kind: "ready", health: request.data }
+      : request.kind === "error"
+        ? { kind: "failed", message: request.message }
+        : request;
   return <HealthContext.Provider value={state}>{children}</HealthContext.Provider>;
 }
 

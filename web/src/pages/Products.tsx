@@ -48,7 +48,9 @@ export function Products() {
     listProducts({ vendorId, limit: PRODUCT_PAGE, offset: 0 })
       .then((page) => {
         if (mine !== generation.current) return;
-        setListing({ items: dedupe([], page.items), received: page.items.length, total: page.total });
+        // As in loadMore: an empty page is the end, whatever `total` says.
+        const received = page.items.length;
+        setListing({ items: dedupe([], page.items), received, total: received === 0 ? 0 : page.total });
         setFirstPage({ kind: "ready" });
       })
       .catch((error: unknown) => {

@@ -81,6 +81,25 @@ def throwaway_url(database_url) -> Iterator[str]:
 
 
 @pytest.fixture
+def isolated_db(throwaway_url, make_client) -> Iterator[tuple[str, Engine]]:
+    """A migrated throwaway database, with the app's settings pointed at it.
+
+    For code under test that touches rows it did not create, such as the
+    startup sweep (it fails every `PROCESSING` import in the database): run
+    against the shared `db`, it would change a developer's in-flight import.
+    Yields `(url, engine)`; the database is dropped afterwards.
+    """
+    result = run_alembic(throwaway_url, "upgrade", "head")
+    assert result.returncode == 0, result.stderr
+    engine = create_engine(throwaway_url)
+    make_client(DATABASE_URL=throwaway_url)  # sets DATABASE_URL for every create_app()
+    try:
+        yield throwaway_url, engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
 def db(migrated_engine) -> Iterator[Session]:
     """A session whose every write is rolled back at the end of the test.
 

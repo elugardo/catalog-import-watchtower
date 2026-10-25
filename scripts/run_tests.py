@@ -59,7 +59,11 @@ def junit_counts(path: Path) -> tuple[int, int, int, int]:
     """(tests, failures, errors, skipped) summed over every <testsuite> in a JUnit file."""
     if not path.is_file():
         return 0, 0, 0, 0
-    root = ET.parse(path).getroot()
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:  # a truncated report counts as zero tests, not a crash
+        print(f"unreadable JUnit report {path}: {exc}", file=sys.stderr)
+        return 0, 0, 0, 0
     suites = [root] if root.tag == "testsuite" else root.iter("testsuite")
     totals = [0, 0, 0, 0]
     for suite in suites:
@@ -70,7 +74,11 @@ def junit_counts(path: Path) -> tuple[int, int, int, int]:
 
 def run(command: list[str]) -> int:
     print(f"\n$ {' '.join(command)}", flush=True)
-    return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
+    try:
+        return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
+    except OSError as exc:  # e.g. npm missing: fail this layer, keep running the others
+        print(f"could not start {command[0]}: {exc}", file=sys.stderr)
+        return 127
 
 
 def pytest_layer(layer: str, *selection: str) -> Result:

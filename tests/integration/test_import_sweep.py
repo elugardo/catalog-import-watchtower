@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.main import create_app
+from tests.integration.conftest import Namespace
 from tests.integration.importing import fixture_bytes, import_row, post_import
 
 
@@ -48,9 +49,10 @@ def attempt_rows(engine, import_id: int) -> list[dict]:
         ]
 
 
-def test_startup_sweep_fails_stuck_imports_and_their_running_attempt(
-    make_client, database_url, migrated_engine, ns
-):
+def test_startup_sweep_fails_stuck_imports_and_their_running_attempt(make_client, isolated_db):
+    # The sweep touches every PROCESSING import, so it runs on its own database.
+    database_url, migrated_engine = isolated_db
+    ns = Namespace(migrated_engine)
     seed = make_client(DATABASE_URL=database_url)
     vendor_id = post_import(seed, ns.name(), fixture_bytes("valid.csv")).json()["vendor"]["id"]
     with migrated_engine.begin() as connection:

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.main import create_app
+from tests.integration.conftest import Namespace
 from tests.integration.contract import walk
 from tests.integration.importing import alert_rows, fixture_bytes, import_row, post_import
 from tests.integration.test_import_sweep import attempt_rows, insert_import
@@ -30,7 +31,10 @@ def start_app() -> list[dict]:
         return list(walk(client, "/api/alerts"))
 
 
-def test_the_sweep_alerts_every_stuck_import_once(make_client, database_url, migrated_engine, ns):
+def test_the_sweep_alerts_every_stuck_import_once(make_client, isolated_db):
+    # The sweep touches every PROCESSING import, so it runs on its own database.
+    database_url, migrated_engine = isolated_db
+    ns = Namespace(migrated_engine)
     seed = make_client(DATABASE_URL=database_url)
     vendor_id = post_import(seed, ns.name(), fixture_bytes("valid.csv")).json()["vendor"]["id"]
     with migrated_engine.begin() as connection:

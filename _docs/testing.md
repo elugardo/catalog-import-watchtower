@@ -63,10 +63,15 @@ unreachable (its tests error, they are never skipped).
 or change rows they did not create: the rollback-only `db` session, the `ns`
 per-test vendor token (with cleanup of every row that token leads to) and
 `throwaway_url` (a separate database, dropped afterwards) for anything
-destructive such as the migration round trip. No test uses a fixed vendor
+destructive such as the migration round trip, or `isolated_db` (the same,
+migrated, with the app pointed at it). No test uses a fixed vendor
 name that demo, fixture or QA data can hold. The `pgdata` volume is kept, so
 the demo upload and anything else in your database survive a run, and the
-command passes twice in a row with no cleanup.
+command passes twice in a row with no cleanup. Code under test that touches
+rows it did not create runs on its own migrated throwaway database
+(`isolated_db`): the startup sweep tests (`test_import_sweep.py`,
+`test_alert_sweep.py`) run the app's lifespan, and the sweep fails *every*
+`PROCESSING` import in the database it is pointed at.
 
 **Nothing on the host is used or modified.** The image copies the checkout
 in (`Dockerfile.test.dockerignore` leaves out `.env`, `.venv/`,

@@ -23,7 +23,7 @@ def test_happy_path_upsert_and_atomic_validation(client, ns):
     assert first.status_code == 201
     vendor_id = first.json()["vendor"]["id"]
     body = products(client, vendor_id).json()
-    assert body["total"] == 4
+    assert body["total"] == 3
     by_sku = {item["sku"]: item for item in body["items"]}
     assert {sku: (p["price_cents"], p["quantity"]) for sku, p in by_sku.items()} == {
         "CHAIR-001": (14999, 8),

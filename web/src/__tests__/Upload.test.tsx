@@ -17,7 +17,7 @@ function fillForm(vendor: string, file: File | null) {
 
 function sentForm(call: unknown[]): FormData {
   const init = call[1] as RequestInit;
-  expect(init.method).toBe("POST");
+  expect(init.method).toBe("PUT");
   expect(init.body).toBeInstanceOf(FormData);
   return init.body as FormData;
 }

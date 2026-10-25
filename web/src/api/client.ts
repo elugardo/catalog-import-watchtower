@@ -54,10 +54,10 @@ async function readJson(response: Response): Promise<unknown> {
 async function request<T>(path: ApiPath, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, {
-      ...init,
-      headers: { Accept: "application/json", ...init?.headers },
-    });
+    // Headers, not an object spread: a spread silently drops a Headers instance or a tuple list.
+    const headers = new Headers(init?.headers);
+    if (!headers.has("Accept")) headers.set("Accept", "application/json");
+    response = await fetch(path, { ...init, headers });
   } catch {
     throw new ApiError(API_UNREACHABLE, null, null);
   }
@@ -78,7 +78,10 @@ async function request<T>(path: ApiPath, init?: RequestInit): Promise<T> {
 
 /** The message to show for anything a request threw. */
 export function errorMessage(error: unknown): string {
-  return error instanceof ApiError ? error.message : API_UNREACHABLE;
+  // Network failures are already ApiError(API_UNREACHABLE); anything else is a
+  // bug in the page, and saying "API unreachable" would point at the wrong place.
+  if (error instanceof ApiError) return error.message;
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function getHealth(): Promise<Health> {

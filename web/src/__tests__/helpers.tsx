@@ -65,5 +65,5 @@ export function anImport(overrides: Partial<Import> = {}): Import {
 }
 
 export function anImportDetail(overrides: Partial<ImportDetail> = {}): ImportDetail {
-  return { ...anImport(overrides), attempts: [], alert: null, agent_actions: [], ...overrides };
+  return { ...anImport(), attempts: [], alert: null, agent_actions: [], ...overrides };
 }

@@ -11,8 +11,9 @@ The project was run by a defined agent team through a documented process,
 and the GitHub record proves it. For every backlog issue closed so far, a
 PM groomed it, an engineer implemented it and handed it off, a QA agent in a
 fresh context verified it, the PM approved it, and the orchestrator merged
-the PR on green CI and closed the issue with an evidence comment. Spec
-changes went in through docs-only PRs before the code depended on them, QA
+the PR on green CI and closed the issue with an evidence comment (on #8
+the PR closed it first, *Deviations* 1). From #3 on, spec changes went in
+through docs-only PRs before the code depended on them, QA
 filed follow-ups instead of changing requirements, and on #8 QA caught a
 gap the engineer's green suite had missed. Where the record departs from
 the process, *Deviations* says so.
@@ -193,6 +194,14 @@ Where the record departs from `_docs/process.md`, stated from the record.
    contradicted "merges only after PASS and APPROVED". It is now the
    documented exception (`_docs/process.md` -> *Docs-only PRs*, and the
    orchestrator *Rules*).
+7. **#9 itself did not run when the lowest-number rule would have picked
+   it.** It has no dependency, so from the close of #4 on it was the lowest
+   unblocked open issue, and `_docs/backlog.md` had planned to close it
+   right after #1. Instead #24, #5, #6, #7, #40 and #8 ran first, and #9
+   ran after #8. The backlog row described 07 as open from the start; the
+   record has no comment on #9 before its groom on 2026-10-25, so it does
+   not say why it was not picked earlier. `_docs/backlog.md` -> *Order*
+   now records what happened.
 
 ## Roles and process
 

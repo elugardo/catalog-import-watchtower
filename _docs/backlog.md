@@ -38,7 +38,10 @@ file is only the map from spec id to issue number and the dependency order.
 09.1 → 09.2, then 10.1 → 10.2, then 06.1, then 11. 07 (#9) was open from the start
 and was meant to close right after the first cycle (#1); instead it stayed
 open while ten cycles ran (#1, #2, #3, #4, #24, #5, #6, #7, #40, #8) and
-ran after #8, as the lowest open number with no open dependency. Its
+ran after #8. It has no dependency, so from the close of #4 on it was the
+lowest unblocked number and the rule would have picked it ahead of #24,
+#5, #6, #7, #40 and #8; it was treated as the row that stays open from
+the start instead (the report's *Deviations* records this). Its
 evidence is those ten cycles, in
 [`evidence/2026-10-25-agent-workflow/report.md`](evidence/2026-10-25-agent-workflow/report.md). #24 (03.2b) runs right after #4 (03.2a)
 even though #5 has a lower number, because #5 depends on #24. #40 (05.1)

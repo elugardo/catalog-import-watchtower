@@ -85,8 +85,12 @@ No request ever answers 422 (CIW-03.2a, #4). FastAPI's
 never reach that handler: a field that is absent is 400 `MISSING_FIELD`; a
 field that is present but wrong (an invalid value, `file` sent as a text
 field, `vendor_name` sent as a file part) is 400 `INVALID_FIELD`, and so is a
-body that is not a parseable multipart form. A body that is not multipart at
-all has no fields, so it is `MISSING_FIELD`.
+body the multipart parser rejects (for example a multipart content type
+without a boundary). A body from which no field can be read, because it is
+not multipart at all or because the parser reads it as an empty form, has no
+fields, so it is `MISSING_FIELD`. A `file` part with an empty filename (what
+a browser sends when no file was chosen) is read as a text field, so it is
+`INVALID_FIELD` ("file must be a file part"), not `INVALID_CONTENT_TYPE`.
 
 ## Upload checks (`POST /api/imports`, spec §4 F1)
 

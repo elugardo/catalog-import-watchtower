@@ -153,7 +153,10 @@ The tables and enums are spec §6. On top of it:
    CIW-05. If the
    database is unreachable at startup, the sweep is skipped with a warning
    naming only the exception type and the app starts anyway (`/api/health`
-   reports `degraded`).
+   reports `degraded`). This covers the app process. The image's entrypoint
+   runs `alembic upgrade head` before uvicorn (spec §8), so a container
+   started with no reachable database exits non-zero before serving;
+   `degraded` is what a database lost after start looks like.
 
 ## On-call worker loop
 

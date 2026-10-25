@@ -62,16 +62,18 @@ Parsing:
 - Comma delimiter only, RFC 4180 quoting (Python's `csv` default dialect), LF or CRLF line endings. A leading UTF-8 BOM is stripped.
 - Headers are trimmed and matched **case-insensitively** (`SKU` = `sku`). A missing, unexpected or duplicate header is a single validation error on line 1 naming the headers; nothing else is validated in that case.
 - Completely empty lines are ignored anywhere in the file. "At least one data row" counts non-empty lines.
+- A line is empty only if it has no characters at all; a line of spaces or of commas only is a data row and is validated. The header is the first non-empty line, and errors report physical file lines (a record whose quoted field spans lines reports the line it starts on). A data row with more or fewer fields than the header is one error with column `row`; its fields are not validated further.
+- Each error's `column` is the field name (`sku`, `name`, `price`, `quantity`), `header` for a header error, `row` for a field-count error, or `file` for an empty file, a file with no data rows, or the row limit (all three on line 1). Messages are at most 200 characters.
 - Errors are reported with the **file line number** (the header is line 1, the first data row is line 2), the column, and a short message that may quote the offending value. The UI says "line N".
 
 Validation rules:
 - At least one data row; required fields may not be blank after trimming.
 - `sku`: after trimming, ASCII `^[A-Za-z0-9_-]{1,64}$`; uniqueness within a vendor compares `casefold()`.
 - `name`: trimmed string of 1–120 printable characters.
-- `price`: after trimming, `^\d{1,10}(\.\d{1,2})?$` (no sign, currency symbol, thousands separator or exponent); stored as integer cents.
-- `quantity`: after trimming, `^\d{1,9}$` (no `1.0`, no `1e3`).
-- Duplicate SKUs **within the uploaded CSV** (compared with `casefold()`) are validation errors on every duplicate line; do not silently pick a winner.
-- All errors are collected (validation stops at 1 000 to bound work); the import stores the first 20 and the total count, and the UI shows both.
+- `price`: after trimming, `^\d{1,10}(\.\d{1,2})?$` (no sign, currency symbol, thousands separator or exponent); stored as integer cents. Digits are ASCII `0-9` only.
+- `quantity`: after trimming, `^\d{1,9}$` (no `1.0`, no `1e3`). Digits are ASCII `0-9` only.
+- Duplicate SKUs **within the uploaded CSV** (compared with `casefold()`) are validation errors on every duplicate line; do not silently pick a winner. Only SKUs that pass the `sku` rule take part in the duplicate check.
+- All errors are collected (validation stops at 1 000 errors to bound work, so the stored total is at most 1 000); the import stores the first 20 and the total count, and the UI shows both.
 - Validate the *entire file* before any product upserts. If any row is invalid, **no product records change**.
 - On success, insert new products or update existing products by `(vendor, normalized SKU)`; an existing product is updated unconditionally (its `updated_at` moves even if the values are identical) and `product_count` is the number of data rows. Products absent from a later upload remain unchanged: **upsert, not full replacement**.
 - Apply the complete batch in one database transaction. A runtime failure rolls back all catalog updates. The import row, each attempt row and each status transition are committed in their own short transactions, so a crash can never leave a half-written catalog, only an import stuck in `PROCESSING`, which a startup sweep marks `FAILED` / `INTERNAL_ERROR`.

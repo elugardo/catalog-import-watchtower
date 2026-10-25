@@ -98,9 +98,14 @@ class UnhandledErrorMiddleware:
                 type(exc).__name__,
                 _describe_request(scope, self.templates),
             )
-            if not response_started:
-                response = error_response(500, "INTERNAL_ERROR", "internal error")
-                await response(scope, receive, send)
+        else:
+            return
+        # Sent outside the `except` block on purpose: if sending fails (the
+        # client went away), the new exception must not carry the original one
+        # as its `__context__`, or uvicorn would print that chained traceback.
+        if not response_started:
+            response = error_response(500, "INTERNAL_ERROR", "internal error")
+            await response(scope, receive, send)
 
 
 def _describe_request(scope: Scope, templates: dict[int, str]) -> str:

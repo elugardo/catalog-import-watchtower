@@ -80,7 +80,9 @@ names and queries:
   message or its `DETAIL` can quote row values) or SQL parameters; the
   engine in `app/db.py`, shared by `app` and `oncall-agent`, is built with
   `hide_parameters=True`, which is not configurable. uvicorn's
-  `Exception in ASGI application` traceback therefore never appears.
+  `Exception in ASGI application` traceback therefore never appears (if the
+  response had already started, uvicorn adds its own one-line
+  `ASGI callable returned without completing response`, also type-free).
   Uvicorn access lines (method, path, status) stay.
 - **Metrics:** `catalog_import_attempts_total{outcome,error_category}`,
   `catalog_import_duration_seconds` (histogram),

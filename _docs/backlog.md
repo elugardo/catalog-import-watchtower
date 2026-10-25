@@ -20,7 +20,8 @@ file is only the map from spec id to issue number and the dependency order.
 | 04.1 | Build the SPA shell, API client, Upload and Imports pages | §4 F1, F3 (history); §5 | 03.2b | P0 | [#5](https://github.com/elugardo/catalog-import-watchtower/issues/5) | `fp-5-ui-upload-history` |
 | 04.2 | Build Dashboard, Import detail and Products pages | §4 F3; §5 | 04.1 | P0 | [#6](https://github.com/elugardo/catalog-import-watchtower/issues/6) | `fp-6-ui-detail-products` |
 | 05 | Add failed-import alerts and failure injection | §4 F4, F5 (alert part) | 03.2b, 04.2 | P0 | [#7](https://github.com/elugardo/catalog-import-watchtower/issues/7) | `fp-7-alerts-injection` |
-| 06 | Add the single test command, scenario coverage and frontend tests | §9 | 03.2b, 04.2, 05 | P0 | [#8](https://github.com/elugardo/catalog-import-watchtower/issues/8) | `fp-8-tests` |
+| 05.1 | Keep SQL bound parameters and catalog content out of error logs | §10 (privacy); AGENTS.md -> Rules | 05 | P0 | [#40](https://github.com/elugardo/catalog-import-watchtower/issues/40) | `fp-40-log-privacy` |
+| 06 | Add the single test command, scenario coverage and frontend tests | §9 | 03.2b, 04.2, 05, 05.1 | P0 | [#8](https://github.com/elugardo/catalog-import-watchtower/issues/8) | `fp-8-tests` |
 | 07 | Create agent team docs + issue workflow evidence | §12 | — (the docs exist; closes after the first full cycle) | P0 | [#9](https://github.com/elugardo/catalog-import-watchtower/issues/9) | `fp-9-team-docs` |
 | 08.1 | Add the six guarded agent tools, audit rows and maintenance CLI | §4 F5 (tools); §7 (retry idempotency); §9 scenario 5 | 05, 06 | P1 | [#10](https://github.com/elugardo/catalog-import-watchtower/issues/10) | `fp-10-agent-tools` |
 | 08.2 | Add the LLM on-call worker loop and the real-LLM recovery evidence | §4 F5 (agent); §9 scenarios 4–5 | 08.1 | P1 | [#11](https://github.com/elugardo/catalog-import-watchtower/issues/11) | `fp-11-oncall-agent` |
@@ -32,11 +33,13 @@ file is only the map from spec id to issue number and the dependency order.
 
 ## Order
 
-01 → 02 → 03.1 → 03.2a → 03.2b → 04.1 → 04.2 → 05 → 06, then 08.1 → 08.2, then
+01 → 02 → 03.1 → 03.2a → 03.2b → 04.1 → 04.2 → 05 → 05.1 → 06, then 08.1 → 08.2, then
 09.1 → 09.2, then 10.1 → 10.2, then 11. 07 is open from the start and closes
 as soon as the first groom → implement → QA → merge cycle has run (expected
 right after #1), since its evidence *is* that cycle. #24 (03.2b) runs right after #4 (03.2a)
-even though #5 has a lower number, because #5 depends on #24.
+even though #5 has a lower number, because #5 depends on #24. #40 (05.1)
+runs right after #7 (05) even though #8 has a lower number, because #8
+depends on #40.
 
 Two deliberate changes from the spec §13 row order, both recorded in the
 issues: PR CI (`ci.yml`) was pulled forward into 01, as this file suggested,
@@ -77,4 +80,6 @@ the docs PR; #28 (a crash during attempt 2) was folded into #10 and closed.
 #31 (the integration suite colliding with the `Sample Furnishings` demo
 vendor, a QA follow-up of #24) was folded into #8 and closed. #36 (open
 incidents older than the newest 100 alerts silently missing from the
-dashboard, a QA follow-up of #6) was folded into #7 and closed.
+dashboard, a QA follow-up of #6) was folded into #7 and closed. #40 (SQL
+bound parameters reaching the app log on an unhandled 500, a QA follow-up of
+#7) was kept as its own issue, CIW-05.1, and runs before #8.

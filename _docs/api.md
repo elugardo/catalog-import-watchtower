@@ -27,8 +27,23 @@ the two disagree, `openapi.yaml` wins and this file is fixed.
   `details` is a list of objects. Validation feedback inside an import
   resource (not an HTTP error) is
   `{ "line": 3, "column": "quantity", "message": "must be a whole number, got '-2'" }`
-  with `line` the **file line number** (header = 1), plus
-  `validation_error_count` for the total beyond the 20 shown.
+  with `line` the **file line number** (header = 1; a record spanning
+  several lines reports the line it starts on), plus
+  `validation_error_count` for the total beyond the 20 shown. Validation
+  stops at 1 000 errors, so `validation_error_count` is at most 1 000.
+  `message` is at most 200 characters. `column` is one of four kinds:
+  - a lowercase field name, `sku`, `name`, `price` or `quantity`, for a
+    field rule on that row (also when the file's header is `PRICE`);
+  - `header` for an invalid header row (missing, unexpected, duplicate or
+    empty headers), reported on the header's line as the only error;
+  - `row` for a record that is wrong as a whole: a field count different
+    from the header's, or a record the `csv` reader cannot parse
+    (an unterminated quote, a field over its size limit);
+  - `file` for the file as a whole, always on line 1: no data rows, or
+    more than 500 data rows (`file has N data rows, limit 500`).
+
+  The validator is `app/services/csv_validation.py` (`validate_csv`, pure,
+  no database).
 - The four list endpoints (`GET /api/imports`, `/api/vendors`,
   `/api/products`, `/api/alerts`) return `{ "items": [...], "total": n }`,
   both required, newest first, with `limit` (default 50, min 1, max 100) and

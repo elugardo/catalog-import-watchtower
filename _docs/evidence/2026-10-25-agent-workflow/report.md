@@ -150,7 +150,13 @@ spec is wrong*). Times are UTC on 2026-10-25.
 | [#45](https://github.com/elugardo/catalog-import-watchtower/pull/45) | `docs-backlog-44` | `backlog.md`, `issue-template.md`, `team/software-engineer.md` | [#8 approval](https://github.com/elugardo/catalog-import-watchtower/issues/8#issuecomment-6401535771) | `4b15920` | [40222168729](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40222168729) | 18:39, before #9 (this issue) |
 
 Every file path is under `_docs/` (`gh pr view <p> --json files`). Every
-body links its PM comment and says `Refs` for the issue that comment is on.
+body links the PM comment it carries out and says `Refs #<n>`. For eight of
+the ten, that is the issue the comment is on. PR #23 carries out the PM
+decision on #22 and says `Refs #3`, the issue whose approval raised #22.
+PR #41 carries out the #7 approval and says `Refs #40`, the issue it adds
+to the backlog. PR #29 carries out comments on #4 and #27 and says
+`Refs #4 #10`, so it names #4 but not #27. `_docs/process.md` -> *Docs-only PRs* step 2 is the
+rule from now on.
 The branch commits are `Docs: <what>`, and the squash commits on `main` are
 `Docs: <what> (#<pr>)`.
 
@@ -177,14 +183,20 @@ Where the record departs from `_docs/process.md`, stated from the record.
    2026-10-24 20:36 UTC) came before the first merge, PR #17 at 23:26 UTC.
    So every merge in *Cycles* was the orchestrator's, made after QA PASS
    and PM APPROVED; Marcos reviews the record afterwards.
-4. **Two spec commits went straight to `main` without a PR.** `20bae07`
+4. **Three commits went straight to `main` without a PR.** The process
+   change `2845fc5` ("Process: PM approval replaces the human merge gate",
+   2026-10-24 20:36 UTC, after the groom of #1 and before its hand-off)
+   changes `_docs/process.md`, `_docs/team/product-manager.md`,
+   `AGENTS.md`, `.claude/agents/product-manager.md` and
+   `.claude/skills/work-issue/SKILL.md`; `20bae07`
    ("Docs: spec names the health status values and the otel-lgtm service",
    2026-10-24 23:27 UTC, after #1's merge) and `4d78c8f` ("Docs: spec
    clarifies product_count, completed_at and list bounds", 2026-10-25
    04:30 UTC, after #2's merge) each change only `_docs/spec.md`. Every
    docs change from #3 on went through a docs-only PR (*Docs-only PRs*).
 5. **Two docs-only PRs closed their follow-up issue by keyword.** The
-   bodies of PR #23 and PR #29 used a closing keyword for the docs
+   bodies of PR #23 and PR #29, and the title of PR #23, used a closing
+   keyword for the docs
    follow-ups they settled (#22 and #27), so those issues closed at the
    merge. That was intended, but it is the habit that later shut #8 too
    early. `_docs/process.md` -> *Docs-only PRs* now says the orchestrator
@@ -198,10 +210,27 @@ Where the record departs from `_docs/process.md`, stated from the record.
    it.** It has no dependency, so from the close of #4 on it was the lowest
    unblocked open issue, and `_docs/backlog.md` had planned to close it
    right after #1. Instead #24, #5, #6, #7, #40 and #8 ran first, and #9
-   ran after #8. The backlog row described 07 as open from the start; the
-   record has no comment on #9 before its groom on 2026-10-25, so it does
-   not say why it was not picked earlier. `_docs/backlog.md` -> *Order*
-   now records what happened.
+   ran after #8. The orchestrator states that this was its oversight: it
+   followed the backlog's spec-order chain (02 -> 03.1 -> ...) and did not
+   pick #9 until after #8. The record had no comment on #9 before its
+   groom on 2026-10-25; the orchestrator's account is recorded in the
+   [PM approval comment on #9](https://github.com/elugardo/catalog-import-watchtower/issues/9#issuecomment-6402551325).
+   `_docs/backlog.md` -> *Order* now records what happened.
+8. **The PM closed four folded follow-ups itself.** #18, #28, #31 and #36
+   were closed as not planned by the PM, within two seconds of its ruling
+   comment on each, while no doc said who closes a folded follow-up and
+   `AGENTS.md` implied that only the orchestrator closes issues. The #9
+   approval made this the rule (`_docs/process.md` step 10,
+   `_docs/team/product-manager.md` -> *Rules*), from QA follow-up #47.
+   The ruling comments:
+   [#18](https://github.com/elugardo/catalog-import-watchtower/issues/18#issuecomment-6390839796)
+   (2026-10-24 23:23:44, closed 23:23:46),
+   [#28](https://github.com/elugardo/catalog-import-watchtower/issues/28#issuecomment-6394693706)
+   (2026-10-25 07:06:03, closed 07:06:03),
+   [#31](https://github.com/elugardo/catalog-import-watchtower/issues/31#issuecomment-6395591324)
+   (08:49:29, closed 08:49:30) and
+   [#36](https://github.com/elugardo/catalog-import-watchtower/issues/36#issuecomment-6397808404)
+   (12:45:36, closed 12:45:37), all UTC.
 
 ## Roles and process
 

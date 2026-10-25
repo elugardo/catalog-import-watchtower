@@ -43,7 +43,10 @@ do not groom, implement or test yourself. The argument is the issue number.
    approval decided a change under `_docs/`, launch the `product-manager`
    agent to land it as a docs-only PR and merge that on green CI before
    any code depends on it (`_docs/process.md` -> *Docs-only PRs*, the one
-   PR that merges without PASS and APPROVED).
+   PR that merges without PASS and APPROVED). Close a QA follow-up that such
+   a PR settles the same way, by hand, with a comment linking the merged
+   PR. A follow-up the PM folded or ruled not planned is already closed by
+   the PM.
 9. **Continue.** Tell Marcos in one short paragraph what was merged and the
    links, then pick the lowest-numbered open issue whose dependencies in
    `_docs/backlog.md` are all closed and start again at step 1. Stop only

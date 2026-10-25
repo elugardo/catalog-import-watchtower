@@ -44,8 +44,15 @@ optional.
    for (a screenshot, a URL, a trace id). The branch commits already say
    `Refs #<n>` and the PR body links the issue (steps 4 and 5).
 10. **Close only after the evidence is recorded.** The orchestrator posts
-   that comment first and then runs `gh issue close <n>`; nothing else
-   closes an issue (see *Conventions* on closing keywords). Then it moves on
+   that comment first and then runs `gh issue close <n>`. No issue is ever
+   closed by a keyword (see *Conventions*). The orchestrator closes every
+   backlog issue this way, and a docs follow-up by hand, with a comment
+   linking the merged PR, once the docs-only PR that settles it has merged
+   (*Docs-only PRs*). The PM closes a QA follow-up that it folds into
+   another issue or rules not planned, with
+   `gh issue close <n> --reason "not planned"`, right after its ruling
+   comment on that follow-up; the ruling comment, which names where the
+   work went, is the evidence. Then it moves on
    to the next issue whose dependencies are closed. Marcos is not a merge
    gate: he reviews the record asynchronously and reopens an issue if
    something is wrong (decided 2026-10-24; before that, he merged every PR
@@ -97,9 +104,10 @@ session.
   frequent.
 - **PRs:** one issue per PR, title `[CIW-NN] <issue title>`, body = criteria
   checklist with how each was checked, test output, the green CI run, and
-  what the reviewer should look at first. The squash commit on `main` takes
-  the PR title: `[CIW-NN] <issue title> (#<pr>)`, or `Docs: <what> (#<pr>)`
-  for a docs-only PR.
+  what the reviewer should look at first. The squash commit on `main` is
+  `[CIW-NN] <issue title> (#<pr>)`, the PR title. For a docs-only PR it is
+  `Docs: <what> (#<pr>)`; when the PR has a single commit, GitHub takes that
+  commit's headline rather than the PR title.
 - **No closing keywords.** GitHub closes an issue for `close`, `closes`,
   `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves` or `resolved`
   followed by an issue number anywhere in a commit message, a PR body or a

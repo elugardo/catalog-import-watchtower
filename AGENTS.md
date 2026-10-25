@@ -100,9 +100,11 @@ while looking right.
   bodies**. Never write a closing keyword (`close`, `closes`, `closed`,
   `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`) next to an
   issue number in a commit, a PR title or a PR body, not even negated:
-  GitHub closes the issue at merge. Closing is the orchestrator's, after QA
-  PASS **and** PM approval (a docs follow-up settled by a docs-only PR is
-  closed by hand once that PR merges), see `_docs/process.md`.
+  GitHub closes the issue at merge. The orchestrator closes a backlog issue
+  after QA PASS **and** PM approval, and a docs follow-up by hand once the
+  docs-only PR that settles it merges; the PM closes a QA follow-up it folds
+  or rules not planned, right after its ruling comment (`_docs/process.md`
+  step 10).
 - **Scope is `_docs/spec.md`.** Section 3 lists the non-goals; they stay out.
   If the spec is wrong or silent, stop and say so; the PM changes the spec, then
   the issue, then the code.

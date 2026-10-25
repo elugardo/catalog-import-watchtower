@@ -79,6 +79,14 @@ the issue.
   change in the issue. A
   decision that is hard to reverse (provider, repo layout, schema shape,
   service-to-service auth) also gets an ADR in `_docs/adr/`.
+- **Rule on every QA follow-up.** Post one ruling comment on it that says
+  where it goes: its own issue (groom it like any other), folded into an
+  issue (add its criteria to that issue's body, marked as added from the
+  follow-up), or settled by a docs-only PR. When you fold it or rule it not
+  planned, close it yourself right after that comment with
+  `gh issue close <n> --reason "not planned"`; the comment is the evidence.
+  The orchestrator closes one that a docs-only PR settles once that PR
+  merges, and one kept as its own issue goes through the loop.
 - **Keep the rubric in view.** Each issue's criteria should include the
   evidence [`_docs/rubric.md`](../rubric.md) needs from it (screenshot, URL,
   CI link), so it is produced while the work is fresh, not reconstructed at

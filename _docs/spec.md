@@ -47,7 +47,7 @@ No authentication, multi-tenant access control, supplier API integrations, webho
 - The UI shows the import result and a link to its detail page.
 - Each upload creates a durable import record with filename, vendor, time, status, and stored source CSV for a possible retry.
 
-**Acceptance:** A valid sample CSV creates a completed import. After a browser refresh, the import history and the import detail still show its status and resulting products, read back from the API (the UI keeps no state of its own). Refreshing the Upload page shows an empty form and never uploads again.
+**Acceptance:** A valid sample CSV creates a completed import; after a browser refresh the import keeps its status on the Imports page and its products on the Products page. The Upload form does not keep the outcome: refreshing it shows an empty form and never uploads again.
 
 ### F2 — Validate and upsert products atomically
 

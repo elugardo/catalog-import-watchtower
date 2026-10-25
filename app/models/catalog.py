@@ -44,6 +44,7 @@ class Product(Base):
     price_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # At most 9 digits (999 999 999), which fits a 32-bit integer.
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Moves on every ORM update; a Core upsert (`ON CONFLICT DO UPDATE`) must set it itself.
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

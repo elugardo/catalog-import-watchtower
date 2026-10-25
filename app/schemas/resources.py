@@ -7,7 +7,7 @@ There is no `csv_bytes`, no `normalized_*` field and no price in dollars here.
 
 from typing import Any, Literal
 
-from pydantic import Field, StrictInt
+from pydantic import AliasChoices, Field, StrictInt
 
 from app.schemas.common import ApiModel, UtcDateTime, ValidationErrorOut
 
@@ -36,7 +36,8 @@ class ProductOut(ApiModel):
 
 
 class AttemptOut(ApiModel):
-    number: int = Field(ge=1)
+    # `import_attempts.attempt_number` when built from the ORM row.
+    number: int = Field(ge=1, validation_alias=AliasChoices("number", "attempt_number"))
     status: AttemptStatus
     error_code: FailureCode | None
     trace_id: str | None
@@ -84,7 +85,11 @@ class ImportOut(ApiModel):
     product_count: int | None = Field(ge=0)
     status: ImportStatus
     failure_code: FailureCode | None
-    validation_errors: list[ValidationErrorOut] = Field(max_length=20)
+    # `imports.validation_errors_json` when built from the ORM row.
+    validation_errors: list[ValidationErrorOut] = Field(
+        max_length=20,
+        validation_alias=AliasChoices("validation_errors", "validation_errors_json"),
+    )
     validation_error_count: int = Field(ge=0)
     inject_transient_failure: bool
     attempt_count: int = Field(ge=0)

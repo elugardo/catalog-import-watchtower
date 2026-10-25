@@ -1,0 +1,596 @@
+openapi: 3.1.0
+info:
+  title: Catalog Import Watchtower API
+  version: 0.1.0
+  summary: Import vendor product catalogs from CSV and follow each import, its attempts and its alert.
+  description: |
+    The contract for spec section 7, written before the endpoints (CIW-02).
+    `_docs/api.md` explains the conventions; where the two disagree, this file wins.
+
+    - Every route is under `/api`. JSON everywhere except the multipart upload.
+    - Every timestamp is an ISO-8601 string in UTC with a `Z` suffix
+      (`2026-10-24T12:00:00Z`).
+    - Money is `price_cents`, an integer number of cents; there is no price in dollars.
+    - Enum values are upper snake case exactly as in spec section 6. `Recovered` is a
+      UI label derived from `recovered`, never a status.
+    - Every list returns `{ items, total }`, newest first, bounded by `limit` / `offset`.
+    - Every 4xx response uses the one error shape `Error`.
+    - There are no agent, retry, internal, acknowledge or dismiss routes: the on-call
+      worker calls the service layer directly.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Local Docker Compose stack
+
+tags:
+  - name: imports
+  - name: catalog
+  - name: alerts
+  - name: health
+
+paths:
+  /api/imports:
+    post:
+      operationId: createImport
+      tags: [imports]
+      summary: Upload a CSV and process it
+      description: |
+        Creates the import and processes it synchronously. The response is 201
+        whenever the import record was created, whatever the processing outcome
+        (`COMPLETED` or `FAILED`); the outcome is in the body. A 4xx means no record
+        was created (the checks that need no parsing, spec section 4 F1).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [vendor_name, file]
+              properties:
+                vendor_name:
+                  type: string
+                  description: Trimmed, 1 to 80 printable characters; matched to an existing vendor by `casefold()`.
+                file:
+                  type: string
+                  format: binary
+                  contentMediaType: text/csv
+                  description: UTF-8 CSV (optional BOM), at most 256 KiB, filename ending in `.csv`.
+                inject_transient_failure:
+                  type: string
+                  enum: ["true", "false"]
+                  default: "false"
+                  description: >-
+                    Synthetic failure injector (demo only, not a real outage). When "true",
+                    the first attempt fails with TRANSIENT_STORAGE_TIMEOUT after validation passed.
+            encoding:
+              file:
+                contentType: text/csv, text/plain, application/vnd.ms-excel, application/octet-stream
+      responses:
+        "201":
+          description: The import was created; `status` says how processing ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportDetail"
+        "400":
+          description: "`MISSING_FIELD`, `INVALID_FIELD`, `INVALID_CONTENT_TYPE` or `INVALID_ENCODING`; no record was created."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                missing_field:
+                  value: { code: MISSING_FIELD, message: vendor_name is required, details: [] }
+                invalid_field:
+                  value: { code: INVALID_FIELD, message: vendor_name must be 1 to 80 printable characters, details: [] }
+                invalid_content_type:
+                  value: { code: INVALID_CONTENT_TYPE, message: file must be a .csv, details: [] }
+                invalid_encoding:
+                  value: { code: INVALID_ENCODING, message: file is not valid UTF-8, details: [] }
+        "413":
+          description: "`FILE_TOO_LARGE`: more than 256 KiB; no record was created."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { code: FILE_TOO_LARGE, message: CSV exceeds 256 KiB, details: [] }
+    get:
+      operationId: listImports
+      tags: [imports]
+      summary: Recent imports, newest first
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of imports.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportList"
+        "400":
+          $ref: "#/components/responses/InvalidQuery"
+
+  /api/imports/{id}:
+    get:
+      operationId: getImport
+      tags: [imports]
+      summary: One import with its errors, attempts, alert and agent activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: The import detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportDetail"
+        "404":
+          description: "`NOT_FOUND`: no import with this id."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example: { code: NOT_FOUND, message: import 42 not found, details: [] }
+
+  /api/vendors:
+    get:
+      operationId: listVendors
+      tags: [catalog]
+      summary: Vendor filter options
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of vendors.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorList"
+        "400":
+          $ref: "#/components/responses/InvalidQuery"
+
+  /api/products:
+    get:
+      operationId: listProducts
+      tags: [catalog]
+      summary: Catalog products, newest `updated_at` first
+      parameters:
+        - name: vendor_id
+          in: query
+          required: false
+          description: Only this vendor's products; all vendors when omitted.
+          schema:
+            type: integer
+            format: int64
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of products.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductList"
+        "400":
+          $ref: "#/components/responses/InvalidQuery"
+
+  /api/alerts:
+    get:
+      operationId: listAlerts
+      tags: [alerts]
+      summary: Current and recent incidents with their import summary
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: A page of alerts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertList"
+        "400":
+          $ref: "#/components/responses/InvalidQuery"
+
+  /api/health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Liveness and database reachability
+      description: Always 200 while the process is up; `status` is `degraded` when `db` is `error`.
+      responses:
+        "200":
+          description: The health report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size.
+      schema:
+        type: integer
+        default: 50
+        minimum: 1
+        maximum: 100
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: Number of records to skip.
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+
+  responses:
+    InvalidQuery:
+      description: "`INVALID_QUERY`: a query parameter is malformed or out of range."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: { code: INVALID_QUERY, message: limit must be between 1 and 100, details: [] }
+
+  schemas:
+    # ---- shared ---------------------------------------------------------------
+    Error:
+      type: object
+      description: The one error shape of every 4xx response.
+      required: [code, message, details]
+      properties:
+        code:
+          type: string
+          description: >-
+            Stable, upper snake case: MISSING_FIELD, INVALID_FIELD, INVALID_CONTENT_TYPE,
+            INVALID_ENCODING, FILE_TOO_LARGE, INVALID_QUERY, NOT_FOUND, INTERNAL_ERROR.
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+
+    ValidationError:
+      type: object
+      description: One validation finding inside an import (not an HTTP error).
+      required: [line, column, message]
+      properties:
+        line:
+          type: integer
+          minimum: 1
+          description: File line number; the header is line 1, the first data row line 2.
+        column:
+          type: string
+        message:
+          type: string
+
+    ImportStatus:
+      type: string
+      enum: [PROCESSING, COMPLETED, FAILED]
+    FailureCode:
+      type: string
+      enum: [VALIDATION_ERROR, TRANSIENT_STORAGE_TIMEOUT, INTERNAL_ERROR]
+    AttemptStatus:
+      type: string
+      enum: [RUNNING, SUCCEEDED, FAILED]
+    AlertStatus:
+      type: string
+      enum: [OPEN, IN_PROGRESS, RESOLVED, NEEDS_ATTENTION]
+    AgentActionKind:
+      type: string
+      enum: [RUN_STARTED, TOOL_CALL, DECISION, RUN_FINISHED, ERROR]
+
+    # ---- catalog --------------------------------------------------------------
+    Vendor:
+      type: object
+      required: [id, display_name]
+      properties:
+        id:
+          type: integer
+          format: int64
+        display_name:
+          type: string
+
+    Product:
+      type: object
+      required: [id, vendor_id, sku, name, price_cents, quantity, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        vendor_id:
+          type: integer
+          format: int64
+        sku:
+          type: string
+          description: As uploaded (trimmed); uniqueness within a vendor ignores case.
+        name:
+          type: string
+        price_cents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Price in integer cents; the frontend formats dollars.
+        quantity:
+          type: integer
+          minimum: 0
+        updated_at:
+          type: string
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix.
+
+    # ---- imports --------------------------------------------------------------
+    Import:
+      type: object
+      description: One import as listed in `GET /api/imports`.
+      required:
+        - id
+        - vendor
+        - filename
+        - sha256
+        - row_count
+        - product_count
+        - status
+        - failure_code
+        - validation_errors
+        - validation_error_count
+        - inject_transient_failure
+        - attempt_count
+        - recovered
+        - created_at
+        - completed_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        vendor:
+          $ref: "#/components/schemas/Vendor"
+        filename:
+          type: string
+        sha256:
+          type: string
+          description: Hex SHA-256 of the uploaded bytes.
+        row_count:
+          type: integer
+          minimum: 0
+          description: Non-empty data lines, counted even when the header is invalid; 0 for an empty file.
+        product_count:
+          type: [integer, "null"]
+          minimum: 0
+          description: Data rows upserted; null unless `status` is COMPLETED.
+        status:
+          $ref: "#/components/schemas/ImportStatus"
+        failure_code:
+          description: Set while FAILED; cleared to null when a retry succeeds.
+          anyOf:
+            - $ref: "#/components/schemas/FailureCode"
+            - type: "null"
+        validation_errors:
+          type: array
+          maxItems: 20
+          description: The first 20 validation errors.
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        validation_error_count:
+          type: integer
+          minimum: 0
+          description: Total number of validation errors, including those beyond the 20 shown.
+        inject_transient_failure:
+          type: boolean
+          description: Whether the synthetic failure injector was requested for this import.
+        attempt_count:
+          type: integer
+          minimum: 0
+          description: Number of processing attempts (derived, not stored).
+        recovered:
+          type: boolean
+          description: Derived, never stored; `status == COMPLETED and attempt_count > 1`. The UI shows it as "Recovered".
+        created_at:
+          type: string
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix.
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix. Set only when COMPLETED; null otherwise.
+
+    Attempt:
+      type: object
+      required: [number, status, error_code, trace_id, started_at, finished_at]
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/AttemptStatus"
+        error_code:
+          anyOf:
+            - $ref: "#/components/schemas/FailureCode"
+            - type: "null"
+        trace_id:
+          type: [string, "null"]
+          description: OpenTelemetry trace id of this attempt (32 hex characters).
+        started_at:
+          type: string
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix.
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix. Null while RUNNING.
+
+    Alert:
+      type: object
+      description: The user-impact alert of one failed import.
+      required: [id, status, reason, claimed_at, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        status:
+          $ref: "#/components/schemas/AlertStatus"
+        reason:
+          type: string
+        claimed_at:
+          type: [string, "null"]
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix. When the on-call worker claimed it.
+        created_at:
+          type: string
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix.
+        updated_at:
+          type: string
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix.
+
+    AgentAction:
+      type: object
+      description: One row of the on-call agent's audit timeline.
+      required: [id, action, tool_name, reason_summary, result, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        action:
+          $ref: "#/components/schemas/AgentActionKind"
+        tool_name:
+          type: [string, "null"]
+        reason_summary:
+          type: [string, "null"]
+        result:
+          type: [object, "null"]
+          description: Short, redacted JSON; never catalog content.
+        created_at:
+          type: string
+          format: date-time
+          description: UTC, ISO-8601 with a Z suffix.
+
+    ImportDetail:
+      description: >-
+        `GET /api/imports/{id}` and the 201 of `POST /api/imports`: the import plus its
+        attempts, its alert and the agent's timeline.
+      allOf:
+        - $ref: "#/components/schemas/Import"
+        - type: object
+          required: [attempts, alert, agent_actions]
+          properties:
+            attempts:
+              type: array
+              description: Oldest first.
+              items:
+                $ref: "#/components/schemas/Attempt"
+            alert:
+              description: Null when the import never failed.
+              anyOf:
+                - $ref: "#/components/schemas/Alert"
+                - type: "null"
+            agent_actions:
+              type: array
+              description: Oldest first.
+              items:
+                $ref: "#/components/schemas/AgentAction"
+      unevaluatedProperties: false
+
+    AlertListItem:
+      description: An alert with its import summary, as listed in `GET /api/alerts`.
+      allOf:
+        - $ref: "#/components/schemas/Alert"
+        - type: object
+          required: [import_id, import_status, failure_code, vendor_display_name, filename]
+          properties:
+            import_id:
+              type: integer
+              format: int64
+            import_status:
+              $ref: "#/components/schemas/ImportStatus"
+            failure_code:
+              anyOf:
+                - $ref: "#/components/schemas/FailureCode"
+                - type: "null"
+            vendor_display_name:
+              type: string
+            filename:
+              type: string
+      unevaluatedProperties: false
+
+    # ---- lists ----------------------------------------------------------------
+    ImportList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Import"
+        total:
+          type: integer
+          minimum: 0
+    VendorList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vendor"
+        total:
+          type: integer
+          minimum: 0
+    ProductList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        total:
+          type: integer
+          minimum: 0
+    AlertList:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlertListItem"
+        total:
+          type: integer
+          minimum: 0
+
+    # ---- health ---------------------------------------------------------------
+    Health:
+      type: object
+      required: [status, db, agent_enabled, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          description: "`degraded` when `db` is `error`."
+        db:
+          type: string
+          enum: [ok, error]
+        agent_enabled:
+          type: boolean
+        version:
+          type: string
+          description: The image tag (`sha-<commit>`), `dev` outside an image.

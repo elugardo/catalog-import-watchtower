@@ -5,6 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+import app.models  # noqa: F401 - registers the six tables on Base.metadata
 from app.db import Base
 from app.settings import get_settings
 
@@ -17,7 +18,7 @@ if config.config_file_name is not None:
 # escaped or `alembic upgrade head` dies with InterpolationSyntaxError at start-up.
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
-# Model modules must be imported before autogenerate can see them (CIW-02 on).
+# `import app.models` above makes every table visible to autogenerate and `alembic check`.
 target_metadata = Base.metadata
 
 

@@ -4,16 +4,29 @@ import logging
 import threading
 from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, MetaData, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.settings import get_settings
 
 log = logging.getLogger(__name__)
 
+# Every constraint gets a deterministic name, so a later additive migration can
+# drop and recreate a CHECK by name to add a value (spec section 6). A CHECK is
+# declared with a short name (`status`) and becomes `ck_<table>_status`.
+NAMING_CONVENTION = {
+    "pk": "pk_%(table_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+}
+
 
 class Base(DeclarativeBase):
-    """Declarative base for every model (tables arrive with CIW-02)."""
+    """Declarative base for every model in `app/models/`."""
+
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 @lru_cache

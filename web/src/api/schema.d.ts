@@ -3,6 +3,7 @@
  * Do not make direct changes to the file.
  */
 
+// hand edit, not generated
 export interface paths {
     "/api/imports": {
         parameters: {

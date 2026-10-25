@@ -190,11 +190,75 @@ tool results carry counts and column names, never values.
 
 ## Redaction contract for the agent tools
 
-`get_import_incident`, `get_import_attempts` and `get_import_diagnostics`
-may return only: `alert_id`, `alert_status`, `import_id`, `import_status`,
-`failure_code`, `attempt_count`, `attempts[] {number, status, error_code,
-trace_id, started_at, finished_at}`, `row_count`,
-`validation_error_count`, `validation_error_columns[]`, `created_at`,
-`completed_at`, `diagnostics {log_query, trace_query}`. A unit test asserts
-that no key outside this list, and no vendor name, product name, SKU or cell
-value, appears in any tool result.
+It covers all six tools of `app/services/agent_tools.py`, their results and
+the `result` of their `TOOL_CALL` audit rows. The tools are not HTTP
+endpoints and `openapi.yaml` does not describe them.
+
+**Allowed keys** (at any depth; `attempts` is a list of objects, `diagnostics`
+an object): `outcome`, `refused_reason`, `alert_id`, `alert_status`,
+`import_id`, `import_status`, `failure_code`, `attempt_count`, `attempts`,
+`number`, `status`, `error_code`, `trace_id`, `started_at`, `finished_at`,
+`row_count`, `validation_error_count`, `validation_error_columns`,
+`created_at`, `completed_at`, `diagnostics`, `log_query`, `trace_query`.
+
+**One result shape.** Every result has `outcome`: `DONE` (the tool did what
+it does; a read tool found its row), `REFUSED` (a guard failed and nothing
+changed) or `NOT_FOUND` (the id names no row: unknown, `0`, negative, or
+beyond `BIGINT`). A `REFUSED` or `NOT_FOUND` result also has
+`refused_reason`. A `REFUSED` result, and the `DONE` result of the three
+writing tools, carries the incident keys below, read after the lock or the
+compare-and-set, so the caller sees the current state. A `NOT_FOUND` result
+carries only the id it was called with. No result carries free text. A tool
+raises only on an unexpected error (the database unreachable), and then
+writes nothing.
+
+**`refused_reason` values** (a closed list): `not_found`,
+`import_not_failed`, `not_transient`, `retry_budget_exhausted`,
+`alert_not_in_progress`, `import_not_completed`, `already_resolved`,
+`empty_reason`, `alert_changed_concurrently`.
+
+| Value | Returned by | When |
+|---|---|---|
+| `not_found` | all six (`NOT_FOUND`) | the id names no row |
+| `import_not_failed` | `retry_failed_import` | the import is `PROCESSING` or `COMPLETED` |
+| `not_transient` | `retry_failed_import` | the failure code is not `TRANSIENT_STORAGE_TIMEOUT` |
+| `retry_budget_exhausted` | `retry_failed_import` | the import does not have exactly 1 attempt |
+| `alert_not_in_progress` | `mark_needs_attention` | the alert is not `IN_PROGRESS` (or another caller changed it first) |
+| `empty_reason` | `mark_needs_attention` | the reason is empty or only whitespace |
+| `import_not_completed` | `resolve_alert` | the import is not `COMPLETED` |
+| `already_resolved` | `resolve_alert` | the alert is `RESOLVED` |
+| `alert_changed_concurrently` | `resolve_alert` | another caller moved the alert to a different status between this call's read and its update |
+
+**Keys per tool:**
+
+- `get_import_incident(alert_id)`: the incident keys `alert_id`,
+  `alert_status`, `import_id`, `import_status`, `failure_code`,
+  `attempt_count`, `attempts[]`, `row_count`, `validation_error_count`,
+  `validation_error_columns[]`, `created_at`, `completed_at`. `created_at` and
+  `completed_at` are the import's. `attempts[]` is ordered by `number`, each
+  with exactly `number, status, error_code, trace_id, started_at,
+  finished_at`. `validation_error_columns[]` is the sorted distinct `column`
+  of the stored errors, from `sku`, `name`, `price`, `quantity`, `header`,
+  `row`, `file`. Timestamps are ISO-8601 UTC with `Z`, as in the API.
+- `get_import_attempts(import_id)`: `import_id`, `attempt_count`,
+  `attempts[]`, for an import in any status, with or without an alert.
+- `get_import_diagnostics(import_id)`: `import_id`, `diagnostics { log_query,
+  trace_query }`, `attempt_count`, `row_count`, `validation_error_count`.
+  **The two strings are placeholders** until the observability queries land
+  (#13): fixed text plus the import id and the latest attempt's `trace_id`.
+  `trace_query` is `null` while that attempt has no `trace_id`.
+- `retry_failed_import`, `mark_needs_attention`, `resolve_alert`: the
+  incident keys, after the call (`alert_id` and `alert_status` are `null` for
+  an import with no alert).
+
+**Audit rows.** The `result` of a `TOOL_CALL` row has `outcome`, the call's
+`alert_id` and `import_id`, `refused_reason` when there is one, and
+`alert_status`, `import_status`, `failure_code`, `attempt_count` when the
+result has them; at most 2 048 bytes. `reason_summary` is set only by a
+`DONE` `mark_needs_attention`: the stored reason.
+
+A unit test (`tests/unit/test_agent_tool_results.py`) holds the allowed keys
+and the `refused_reason` values to these two lists, and an integration
+canary test (`tests/integration/test_agent_redaction.py`) asserts that no
+vendor name, filename, product name, SKU, cell value or header name appears
+in any tool result or audit row.

@@ -60,10 +60,14 @@ system, no HTTP, no SQL. The same functions back the maintenance CLI
 | `get_import_diagnostics(import_id)` | observability query strings for this import and trace, plus the counts already in the incident | read-only, redacted |
 | `retry_failed_import(import_id)` | re-processes the *saved* CSV as attempt 2 | row lock on the import; only when status `FAILED`, failure code `TRANSIENT_STORAGE_TIMEOUT`, attempt count 1; a refused call returns the current state as a no-op |
 | `mark_needs_attention(alert_id, reason)` | alert → `NEEDS_ATTENTION` with a concise, content-free reason | alert must be `IN_PROGRESS` |
-| `resolve_alert(alert_id)` | alert → `RESOLVED` | only when the import is `COMPLETED` |
+| `resolve_alert(alert_id)` | alert `OPEN`, `IN_PROGRESS` or `NEEDS_ATTENTION` → `RESOLVED` | only when the import is `COMPLETED`; an alert already `RESOLVED` is refused |
 
 The guards live in the functions, not in the prompt. A prompt that behaves
-is nice; a function that refuses is the actual control. Every call whose
+is nice; a function that refuses is the actual control. Every tool returns
+one result shape (`outcome` `DONE` / `REFUSED` / `NOT_FOUND`, with a
+`refused_reason` from a closed list; `_docs/api.md` -> *Redaction
+contract*), and the two alert tools are compare-and-set, so two callers
+never both win. Every call whose
 target has an alert writes its own `TOOL_CALL` audit row, refused calls
 included; a call on an unknown id, or on an import that never failed, writes
 none.

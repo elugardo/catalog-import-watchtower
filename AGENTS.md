@@ -87,7 +87,7 @@ npm --prefix web run gen:api                          # regenerate web/src/api/s
 npm --prefix web run check:api                        # one layer on the host (needs Node): fails when schema.d.ts differs from openapi.yaml
 npm --prefix web test                                 # one layer on the host (needs Node): frontend tests (Vitest + Testing Library, fetch stubbed)
 npm --prefix web run build                            # typecheck + production bundle in web/dist (in CI through the image build)
-docker compose exec app python -m app.oncall tools <tool> [args]   # run one agent tool by hand (issue 08)
+docker compose exec -T app python -m app.oncall tools <tool> [args]   # run one of the six agent tools by hand: same guards and audit rows; JSON on stdout; exit 0 DONE, 1 REFUSED, 2 usage, 3 NOT_FOUND, 4 error (_docs/architecture.md -> On-call worker loop)
 ```
 
 ## Rules

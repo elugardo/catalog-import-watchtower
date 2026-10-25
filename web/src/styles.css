@@ -276,3 +276,72 @@ button {
 .nowrap {
   white-space: nowrap;
 }
+
+.label--warn {
+  color: var(--warn);
+}
+
+.status__value--alert-open,
+.status__value--alert-needs_attention {
+  color: var(--bad);
+}
+
+.status__value--alert-in_progress {
+  color: var(--warn);
+}
+
+.status__value--alert-resolved {
+  color: var(--ok);
+}
+
+/* ---- dashboard ------------------------------------------------------------ */
+
+.counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 0.5rem;
+}
+
+.counts__tile {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  min-width: 0;
+}
+
+.counts__tile dt {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.counts__tile dd {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+.counts__tile--completed dd {
+  color: var(--ok);
+}
+
+.counts__tile--failed dd {
+  color: var(--bad);
+}
+
+/* ---- products, detail ----------------------------------------------------- */
+
+.filter {
+  margin-bottom: 0.75rem;
+}
+
+.filter select {
+  font: inherit;
+  padding: 0.3rem 0.4rem;
+  width: 100%;
+  max-width: 28rem;
+}
+
+.json {
+  overflow-wrap: anywhere;
+}

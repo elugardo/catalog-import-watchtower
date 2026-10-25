@@ -13,9 +13,34 @@ export type Import = Schemas["Import"];
 export type ImportDetail = Schemas["ImportDetail"];
 export type ImportList = Schemas["ImportList"];
 export type ValidationError = Schemas["ValidationError"];
+export type Attempt = Schemas["Attempt"];
+export type Alert = Schemas["Alert"];
+export type AlertStatus = Schemas["AlertStatus"];
+export type AlertListItem = Schemas["AlertListItem"];
+export type AlertList = Schemas["AlertList"];
+export type AgentAction = Schemas["AgentAction"];
+export type Vendor = Schemas["Vendor"];
+export type VendorList = Schemas["VendorList"];
+export type Product = Schemas["Product"];
+export type ProductList = Schemas["ProductList"];
 export type ApiErrorBody = Schemas["Error"];
 
 type ApiPath = keyof paths;
+
+/**
+ * A path from the contract with its `{id}` filled in and an optional query
+ * string. Query values are integers; undefined ones are left out, and the
+ * order of the keys is the order of the query string.
+ */
+function apiUrl(path: ApiPath, options: { id?: string; query?: Record<string, number | undefined> } = {}): string {
+  let url: string = path;
+  if (options.id !== undefined) url = url.replace("{id}", encodeURIComponent(options.id));
+  const pairs = Object.entries(options.query ?? {}).filter(
+    (entry): entry is [string, number] => entry[1] !== undefined,
+  );
+  if (pairs.length > 0) url += `?${pairs.map(([key, value]) => `${key}=${value}`).join("&")}`;
+  return url;
+}
 
 /**
  * Every failed request ends here, with the text the UI shows:
@@ -51,7 +76,7 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-async function request<T>(path: ApiPath, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     // Headers, not an object spread: a spread silently drops a Headers instance or a tuple list.
@@ -85,12 +110,49 @@ export function errorMessage(error: unknown): string {
 }
 
 export function getHealth(): Promise<Health> {
-  return request<Health>("/api/health");
+  return request<Health>(apiUrl("/api/health"));
 }
 
 /** `GET /api/imports` with the server's defaults (limit 50, no offset). */
 export function listImports(): Promise<ImportList> {
-  return request<ImportList>("/api/imports");
+  return request<ImportList>(apiUrl("/api/imports"));
+}
+
+/** `GET /api/imports?limit=N`: the newest N imports (the dashboard asks for 100). */
+export function listNewestImports(limit: number): Promise<ImportList> {
+  return request<ImportList>(apiUrl("/api/imports", { query: { limit } }));
+}
+
+/** `GET /api/imports/{id}`, with the id exactly as it appears in the page URL. */
+export function getImport(id: string): Promise<ImportDetail> {
+  return request<ImportDetail>(apiUrl("/api/imports/{id}", { id }));
+}
+
+/** `GET /api/alerts?limit=N`, newest first. */
+export function listAlerts(limit: number): Promise<AlertList> {
+  return request<AlertList>(apiUrl("/api/alerts", { query: { limit } }));
+}
+
+/** `GET /api/vendors?limit=N`. */
+export function listVendors(limit: number): Promise<VendorList> {
+  return request<VendorList>(apiUrl("/api/vendors", { query: { limit } }));
+}
+
+export interface ProductQuery {
+  /** All vendors when null. */
+  vendorId: number | null;
+  limit: number;
+  /** Left out of the URL when 0 (the first page). */
+  offset: number;
+}
+
+/** `GET /api/products?[vendor_id=..&]limit=..[&offset=..]`, newest `updated_at` first. */
+export function listProducts({ vendorId, limit, offset }: ProductQuery): Promise<ProductList> {
+  return request<ProductList>(
+    apiUrl("/api/products", {
+      query: { vendor_id: vendorId ?? undefined, limit, offset: offset > 0 ? offset : undefined },
+    }),
+  );
 }
 
 export interface CreateImportInput {
@@ -108,5 +170,5 @@ export function createImport(input: CreateImportInput): Promise<ImportDetail> {
   if (input.file) form.append("file", input.file);
   form.append("inject_transient_failure", input.injectTransientFailure ? "true" : "false");
   // No Content-Type header: the browser sets multipart/form-data with its boundary.
-  return request<ImportDetail>("/api/imports", { method: "POST", body: form });
+  return request<ImportDetail>(apiUrl("/api/imports"), { method: "POST", body: form });
 }

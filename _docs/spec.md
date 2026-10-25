@@ -86,14 +86,14 @@ Validation rules:
 
 ### F3 — Import history, detail, and catalog views
 
-- **Dashboard:** three mutually exclusive counts, **Completed** (status `COMPLETED`, one attempt), **Recovered** (`COMPLETED`, more than one attempt) and **Failed** (`FAILED`); a table of the newest imports; **open incidents**, defined as alerts with status `OPEN` or `IN_PROGRESS` (alerts in `NEEDS_ATTENTION` and `RESOLVED` appear in a "recent incidents" list, not as open).
+- **Dashboard:** three mutually exclusive counts, **Completed** (status `COMPLETED`, one attempt), **Recovered** (`COMPLETED`, more than one attempt) and **Failed** (`FAILED`, whatever its attempt count; a `PROCESSING` import is in none of them); a table of the newest 10 imports; **open incidents**, defined as alerts with status `OPEN` or `IN_PROGRESS` (alerts in `NEEDS_ATTENTION` and `RESOLVED` appear in a "recent incidents" list of the newest 10, not as open). The dashboard reads one `GET /api/imports?limit=100` and one `GET /api/alerts?limit=100` and pages no further. The counts cover the newest 100 imports; when `total` is above 100 the page says `counts cover the newest 100 of N imports`. Both incident lists are drawn from the newest 100 alerts; when the alerts `total` is above 100 the page says `incidents cover the newest 100 of N alerts`. Exact counts and complete incident lists beyond 100 records would need an API change and are not part of the MVP.
 - **Import history:** newest first, showing vendor, filename, timestamp, status, attempted row count, and successful product count.
 - **Import detail:** status, vendor, filename, created/completed time, attempts, error category, up to 20 validation errors, incident status, and agent activity timeline.
-- **Products:** filter by vendor, showing SKU, name, price, quantity, and last updated time.
+- **Products:** filter by vendor, showing SKU, name, price, quantity, and last updated time. The vendor filter offers the newest 100 vendors (one `GET /api/vendors?limit=100`); when the vendors `total` is above 100 the page says `showing the newest 100 of N vendors`.
 - Define import statuses as `PROCESSING`, `COMPLETED`, and `FAILED`. **Recovered** is a UI label for a `COMPLETED` import with more than one attempt, not a separate persisted status.
 - Show clear empty states and API-error messages. Basic responsive layout; no elaborate design system required.
 - Every timestamp is shown in UTC as `YYYY-MM-DD HH:MM:SS UTC` (`2026-10-24T12:00:00Z` is `2026-10-24 12:00:00 UTC`), never in the browser's time zone, through one shared formatter.
-- Lists show the newest 50 records. Only the products list pages (`limit`/`offset`, a "load more" control), because one import can add 500 rows.
+- The Imports page shows the newest 50 imports. Only the products list pages (`limit`/`offset`, a "load more" control), because one import can add 500 rows. The dashboard and the vendor filter read up to 100 records once, as above; no other list pages.
 
 **Acceptance:** An operator can follow an upload to the import detail and then find imported products. A failed import shows why it failed.
 
@@ -120,13 +120,13 @@ Validation rules:
 - The retry reuses the exact saved CSV; it does not accept a new file and is safe against double invocation. No arbitrary shell commands, code changes, direct DB mutation, broad network access, or open-ended tool execution.
 - Record each agent invocation, tool call, decision, outcome, timestamp, and associated alert/import in an auditable database timeline (`agent_actions`, with `action` one of `RUN_STARTED`, `TOOL_CALL`, `DECISION`, `RUN_FINISHED`, `ERROR`). One LLM conversation per alert, at most `AGENT_MAX_TOOL_CALLS` (default 8) tool calls and `AGENT_TIMEOUT_SECONDS` (default 120) of wall time; on exceeding either, mark `NEEDS_ATTENTION` with the reason "agent run exceeded limits".
 - After successful retry, mark import `COMPLETED` and alert `RESOLVED`. If retry fails, leave the import failed and mark the alert `NEEDS_ATTENTION`.
-- If `AGENT_ENABLED` is not `true` or no key is configured, imports still work, alerts remain `OPEN`, `/api/health` reports `agent_enabled: false`, and the UI shows "automated recovery disabled" on open alerts. There is no heartbeat and no operator-facing manual retry in the MVP; the operator uploads the file again. Do not pretend that a deterministic retry is AI recovery.
+- If `AGENT_ENABLED` is not `true`, the worker never claims, imports still work, alerts remain `OPEN`, `/api/health` reports `agent_enabled: false`, and the UI shows "automated recovery disabled" on every open alert (status `OPEN` or `IN_PROGRESS`, as in F3) on the dashboard and the import detail. `agent_enabled` reflects `AGENT_ENABLED` only: the provider key is read by the worker alone, and the app process never sees it. With `AGENT_ENABLED=true` but no key configured, the worker logs once that it is idle and never claims; alerts remain `OPEN` and health still reports `agent_enabled: true`, so this misconfiguration shows up as alerts that stay `OPEN` and the worker's idle log line. There is no heartbeat and no operator-facing manual retry in the MVP; the operator uploads the file again. Do not pretend that a deterministic retry is AI recovery.
 
 **Acceptance:** A real LLM call is observable in the demo; the transient-failure incident triggers a tool-based retry and ends `COMPLETED` with two attempts; a validation incident does not trigger a retry and is marked for attention.
 
 ## 5. UI scope
 
-A simple top navigation: **Dashboard | Upload | Imports | Products**. Import detail is opened from a table link. Alert and agent activity are presented on the dashboard and import detail, avoiding an extra complex incident-management page. Lists show the newest 50 records; only the products list pages (`limit`/`offset`). No sorting, search, or filters beyond the vendor filter.
+A simple top navigation: **Dashboard | Upload | Imports | Products**. Import detail is opened from a table link. Alert and agent activity are presented on the dashboard and import detail, avoiding an extra complex incident-management page. The Imports page shows the newest 50 imports, and the dashboard and the vendor filter read the newest 100 records (§4 F3); only the products list pages (`limit`/`offset`). No sorting, search, or filters beyond the vendor filter.
 
 ## 6. Data model (minimum)
 

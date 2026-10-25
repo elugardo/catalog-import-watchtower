@@ -48,7 +48,7 @@ jobs:
           status=$(curl -sS -o health.json -w '%{http_code}' http://localhost:8000/api/health)
           echo "HTTP $status"; cat health.json; echo
           test "$status" = 200
-          jq -e '.db == "okay"' health.json
+          jq -e '.db == "ok"' health.json
       - name: Stack logs (on failure)
         if: failure()
         run: docker compose logs

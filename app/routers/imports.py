@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from starlette.datastructures import UploadFile
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartException
 
 from app.schemas import ErrorOut, ImportDetailOut
@@ -63,7 +64,9 @@ async def read_upload(request: Request) -> UploadRequest:
     """
     try:
         form = await request.form()
-    except (HTTPException, MultiPartException):
+    except (StarletteHTTPException, MultiPartException):
+        # Starlette re-raises a parser error as its own HTTPException, which
+        # FastAPI's subclass would not catch.
         raise invalid("the request body is not a valid multipart form") from None
     try:
         # 1. Presence.

@@ -60,6 +60,7 @@ def test_malformed_multipart_is_invalid_field(client):
         headers={"Content-Type": "multipart/form-data; boundary=b"},
     )
     assert_error(response, 400, "INVALID_FIELD")
+    assert response.json()["message"] == "the request body is not a valid multipart form"
 
 
 def test_oversized_text_field_is_invalid_field(client):

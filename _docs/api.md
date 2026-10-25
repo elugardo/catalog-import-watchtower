@@ -12,7 +12,11 @@ parameters (name, location, `required`, `minimum`, `maximum`,
 body (4xx included, `$ref` and `allOf` resolved) and the upload request
 body. The generated schema lists no 422
 and no `HTTPValidationError` (`app/main.py` removes them). The frontend's
-client types are derived from the YAML in CIW-04.1 (#5). This file holds the
+client types are generated from the YAML by `npm --prefix web run gen:api`
+(`openapi-typescript`) into the committed `web/src/api/schema.d.ts`, which
+`web/src/api/client.ts` uses; CI's `frontend` job runs
+`npm run check:api`, which regenerates them and fails when they differ from
+the committed file (CIW-04.1, #5). This file holds the
 conventions and the error catalogue that the YAML alone does not explain. If
 the two disagree, `openapi.yaml` wins and this file is fixed.
 

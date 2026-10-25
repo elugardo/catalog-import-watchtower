@@ -87,6 +87,10 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci --no-audit --no-fund
+      # CIW-04.1: regenerate the API types from ../openapi.yaml and fail when
+      # they differ from the committed web/src/api/schema.d.ts.
+      - name: Generated API types match openapi.yaml (run `npm run gen:api` to fix)
+        run: npm run check:api
       - run: npm test
       - run: npm run build
 

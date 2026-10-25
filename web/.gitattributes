@@ -1,0 +1,4 @@
+# The generated API types are compared byte for byte by `npm run check:api`
+# (openapi-typescript --check), which emits LF. Keep them LF on every checkout,
+# including Windows with core.autocrlf=true.
+src/api/schema.d.ts text eol=lf

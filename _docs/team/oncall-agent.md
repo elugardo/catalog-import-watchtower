@@ -26,9 +26,12 @@ the prompt. The step-by-step routine it follows is
   `AGENT_CLAIM_TIMEOUT_SECONDS` (default 300) is returned to `OPEN` on the
   next poll; the attempt-limit guard makes a second run harmless.
 - If no LLM credentials are configured (`AGENT_ENABLED` unset or no API key),
-  the worker does not claim anything. Alerts stay `OPEN`, and the UI shows the
-  agent as unavailable. A deterministic retry is never presented as AI
-  recovery.
+  the worker does not claim anything and alerts stay `OPEN`. With
+  `AGENT_ENABLED` unset, `/api/health` reports `agent_enabled: false` and the
+  UI shows "automated recovery disabled" on open alerts. With
+  `AGENT_ENABLED=true` and no key, the app cannot tell (only the worker reads
+  the key), so the worker's idle log line is the signal. A deterministic retry
+  is never presented as AI recovery.
 
 ## What it is told
 

@@ -173,7 +173,7 @@ Without this, the On-Call Agent rubric row is not earned.
 
 | Symptom | Check | Fix |
 |---|---|---|
-| alert stays `OPEN` forever | `GET /api/health` → `agent_enabled` | set `AGENT_ENABLED=true` and the key; restart `oncall-agent` |
+| alert stays `OPEN` forever | `GET /api/health` → `agent_enabled`; if `true`, `docker compose logs oncall-agent` for the idle line (key missing) | set `AGENT_ENABLED=true` and the key in `.env`; restart `oncall-agent` |
 | alert stuck `IN_PROGRESS` | worker logs by `alert_id` | the stale-claim timeout (5 min) returns it to `OPEN`; otherwise `docker compose exec app python -m app.oncall tools mark_needs_attention <alert_id> "<reason>"` |
 | retry refused (no-op) | `GET /api/imports/{id}` attempts and failure code | by design for validation errors and after two attempts; operator uploads a corrected file |
 | import stuck `PROCESSING` | app logs around the crash | the startup sweep marks it `FAILED` / `INTERNAL_ERROR` on the next start; `docker compose restart app` |

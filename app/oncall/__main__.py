@@ -1,9 +1,12 @@
 """`python -m app.oncall`: the worker process entry point.
 
-CIW-01 stub. It logs once why it is idle, then waits for SIGTERM/SIGINT so
-Compose can stop it within the default grace period. It makes no LLM call,
-touches no table and claims nothing. CIW-08.2 replaces the wait with the
-poll / claim / LLM loop described in `_docs/architecture.md`.
+Without credentials (`AGENT_ENABLED` not true, `LLM_PROVIDER` not
+`anthropic`, `ANTHROPIC_API_KEY` missing or empty, or no `LLM_MODEL`) it logs
+one idle line naming which, never a value, claims nothing and waits for
+SIGTERM/SIGINT. Otherwise it polls every `AGENT_POLL_SECONDS`
+(`app/oncall/poller.py`) and runs one LLM conversation per claimed alert
+(`app/oncall/llm.py`). A failed poll (the database down, for example) logs
+the exception type only and the next poll tries again.
 
 `python -m app.oncall tools <tool> [args]` is the maintenance CLI instead
 (`app/oncall/cli.py`): one tool call, then exit.
@@ -14,7 +17,7 @@ import signal
 import sys
 import threading
 
-from app.settings import get_settings
+from pydantic import ValidationError
 
 log = logging.getLogger("app.oncall")
 
@@ -30,15 +33,16 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         stream=sys.stdout,
     )
-    settings = get_settings()
+    from app.oncall import llm, poller
 
-    if settings.agent_enabled:
-        log.info(
-            "oncall-agent: AGENT_ENABLED=true but the worker loop is not implemented yet (CIW-08.2); staying idle"
-        )
-    else:
-        log.info("oncall-agent: idle because AGENT_ENABLED is not true")
-
+    try:
+        config: poller.WorkerConfig | None = poller.WorkerConfig.from_env()
+        reason = poller.idle_reason(config)
+    except ValidationError as exc:  # app.settings: its message quotes the value, never log it
+        fields = ", ".join(sorted({str(error["loc"][0]).upper() for error in exc.errors()}))
+        config, reason = None, f"{fields or 'a setting'} is not valid"
+    except ValueError as exc:  # a tuning variable that is not a positive number
+        config, reason = None, str(exc)
     stop = threading.Event()
 
     def _handle_signal(signum: int, _frame: object) -> None:
@@ -48,8 +52,25 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    while not stop.wait(timeout=1.0):
-        pass
+    if config is None or reason is not None:
+        log.info("oncall-agent: idle because %s", reason)
+        while not stop.wait(timeout=1.0):
+            pass
+        return 0
+
+    client = llm.make_client()
+    log.info(
+        "oncall-agent: polling every %ss (provider %s, model %s)",
+        config.poll_seconds,
+        config.provider,
+        config.model,
+    )
+    while not stop.is_set():
+        try:
+            poller.poll_once(client, config)
+        except Exception as exc:  # noqa: BLE001 - one line, the type only
+            log.warning("oncall-agent: poll failed: %s", type(exc).__name__)
+        stop.wait(timeout=config.poll_seconds)
     return 0
 
 

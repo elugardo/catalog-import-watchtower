@@ -8,7 +8,9 @@ may appear in any serialised result.
 
 import io
 import json
+import re
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,44 +21,23 @@ from app.services import agent_tools as tools
 
 CANARY = "CANARY-UNIT-7f3a9c"
 
-# `_docs/api.md` -> *Redaction contract*, copied here because `_docs/` is not in
-# the test image. Change both together; a key added to the code only fails here.
-API_MD_ALLOWED_KEYS = {
-    "outcome",
-    "refused_reason",
-    "alert_id",
-    "alert_status",
-    "import_id",
-    "import_status",
-    "failure_code",
-    "attempt_count",
-    "attempts",
-    "number",
-    "status",
-    "error_code",
-    "trace_id",
-    "started_at",
-    "finished_at",
-    "row_count",
-    "validation_error_count",
-    "validation_error_columns",
-    "created_at",
-    "completed_at",
-    "diagnostics",
-    "log_query",
-    "trace_query",
-}
-API_MD_REFUSED_REASONS = {
-    "not_found",
-    "import_not_failed",
-    "not_transient",
-    "retry_budget_exhausted",
-    "alert_not_in_progress",
-    "import_not_completed",
-    "already_resolved",
-    "empty_reason",
-    "alert_changed_concurrently",
-}
+# `_docs/api.md` -> *Redaction contract* is the source: the test image ships that
+# one file (`Dockerfile.test.dockerignore`), so a change to either side alone fails.
+API_MD = Path(__file__).resolve().parents[2] / "_docs" / "api.md"
+
+
+def redaction_contract_list(label: str) -> list[str]:
+    """The backticked values of one bold paragraph of *Redaction contract*, in order."""
+    text = API_MD.read_text(encoding="utf-8")
+    section = text.split("## Redaction contract", 1)[1].split("\n## ", 1)[0]
+    match = re.search(re.escape(label) + r"(.*?)\n\s*\n", section, re.DOTALL)
+    assert match, f"{label} not found in _docs/api.md -> Redaction contract"
+    listed = re.sub(r"\([^)]*\)", "", match.group(1))  # a parenthetical is a note, not the list
+    return re.findall(r"`([a-z_]+)`", listed)
+
+
+API_MD_ALLOWED_KEYS = redaction_contract_list("**Allowed keys**")
+API_MD_REFUSED_REASONS = redaction_contract_list("**`refused_reason` values**")
 
 
 def keys_at_any_depth(value: Any) -> set[str]:
@@ -71,12 +52,14 @@ def keys_at_any_depth(value: Any) -> set[str]:
 
 
 def test_the_allowed_keys_are_the_api_md_list():
-    assert tools.ALLOWED_KEYS == API_MD_ALLOWED_KEYS
+    assert len(API_MD_ALLOWED_KEYS) == len(set(API_MD_ALLOWED_KEYS)), API_MD_ALLOWED_KEYS
+    assert tools.ALLOWED_KEYS == set(API_MD_ALLOWED_KEYS)
 
 
 def test_the_refused_reasons_are_the_api_md_list():
-    assert set(tools.REFUSED_REASONS) == API_MD_REFUSED_REASONS
+    assert set(tools.REFUSED_REASONS) == set(API_MD_REFUSED_REASONS)
     assert len(set(tools.REFUSED_REASONS)) == len(tools.REFUSED_REASONS)
+    assert len(API_MD_REFUSED_REASONS) == len(set(API_MD_REFUSED_REASONS))
 
 
 # ---- fixed rows ----------------------------------------------------------------------------

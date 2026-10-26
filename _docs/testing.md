@@ -115,9 +115,17 @@ first pull of the `python`, `node`, `uv` and `postgres` base images adds a few
 minutes once. A warm run (image cached, `db` up) takes about 1.5 minutes,
 most of it the integration layer (about 1 minute). Since PR #49 (CIW-08.1)
 added the concurrency tests, a run on the Windows dev machine takes about 15
-minutes, while the CI `Tests` job still takes under 2 minutes; until the local
+minutes, while the CI `Tests` job takes about 2 to 3 minutes; until the local
 run is made faster, the green CI run of the one command on a PR's head counts
 as the full run (see `process.md` -> *Deadline mode*).
+
+Measured after CIW-08.2 (`tests/oncall/` added, 415 unit / 304 integration /
+1 check / 49 frontend tests): the CI `Tests` job on PR #55's head `44dd161`
+took 3 min 2 s (run 40316700319; 2 min 29 s on the first head, `3b02901`
+plus docs). One local run on the Windows dev machine, test image cached,
+against a running stack with a live `oncall-agent`, took 564 s (9 min 24 s),
+of which the integration layer was 7 min 18 s
+(`_docs/evidence/2026-10-26-real-llm-recovery/report.md`).
 
 **One layer alone.** Inside the container, name the layers after the service:
 

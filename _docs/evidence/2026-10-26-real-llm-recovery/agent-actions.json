@@ -1,0 +1,117 @@
+{
+  "source": "GET /api/imports/1 (local stack, 2026-10-26); only the fields below are kept: no vendor, filename or CSV content",
+  "import_id": 1,
+  "status": "COMPLETED",
+  "attempt_count": 2,
+  "recovered": true,
+  "attempts": [
+    {
+      "number": 1,
+      "status": "FAILED",
+      "error_code": "TRANSIENT_STORAGE_TIMEOUT",
+      "trace_id": null,
+      "started_at": "2026-10-26T04:31:50.703513Z",
+      "finished_at": "2026-10-26T04:31:50.739714Z"
+    },
+    {
+      "number": 2,
+      "status": "SUCCEEDED",
+      "error_code": null,
+      "trace_id": null,
+      "started_at": "2026-10-26T04:32:03.383784Z",
+      "finished_at": "2026-10-26T04:32:03.429719Z"
+    }
+  ],
+  "alert": {
+    "id": 1,
+    "status": "RESOLVED",
+    "reason": "TRANSIENT_STORAGE_TIMEOUT on attempt 1 (synthetic demo fault)",
+    "claimed_at": "2026-10-26T04:32:00.530948Z",
+    "created_at": "2026-10-26T04:31:50.739714Z",
+    "updated_at": "2026-10-26T04:32:04.293137Z"
+  },
+  "agent_actions": [
+    {
+      "id": 1,
+      "action": "RUN_STARTED",
+      "tool_name": null,
+      "reason_summary": "provider anthropic, model claude-haiku-5-5",
+      "result": {
+        "model": "claude-haiku-5-5",
+        "provider": "anthropic"
+      },
+      "created_at": "2026-10-26T04:32:00.550730Z"
+    },
+    {
+      "id": 2,
+      "action": "TOOL_CALL",
+      "tool_name": "get_import_incident",
+      "reason_summary": null,
+      "result": {
+        "outcome": "DONE",
+        "alert_id": 1,
+        "import_id": 1,
+        "alert_status": "IN_PROGRESS",
+        "failure_code": "TRANSIENT_STORAGE_TIMEOUT",
+        "attempt_count": 1,
+        "import_status": "FAILED"
+      },
+      "created_at": "2026-10-26T04:32:02.177368Z"
+    },
+    {
+      "id": 3,
+      "action": "TOOL_CALL",
+      "tool_name": "retry_failed_import",
+      "reason_summary": null,
+      "result": {
+        "outcome": "DONE",
+        "alert_id": 1,
+        "import_id": 1,
+        "alert_status": "IN_PROGRESS",
+        "failure_code": null,
+        "attempt_count": 2,
+        "import_status": "COMPLETED"
+      },
+      "created_at": "2026-10-26T04:32:03.497584Z"
+    },
+    {
+      "id": 4,
+      "action": "TOOL_CALL",
+      "tool_name": "resolve_alert",
+      "reason_summary": null,
+      "result": {
+        "outcome": "DONE",
+        "alert_id": 1,
+        "import_id": 1,
+        "alert_status": "RESOLVED",
+        "failure_code": null,
+        "attempt_count": 2,
+        "import_status": "COMPLETED"
+      },
+      "created_at": "2026-10-26T04:32:04.281341Z"
+    },
+    {
+      "id": 5,
+      "action": "DECISION",
+      "tool_name": "resolve_alert",
+      "reason_summary": "The retry completed the import, so I'm resolving the alert: the import is COMPLETED after one retry.",
+      "result": {
+        "outcome": "RESOLVED"
+      },
+      "created_at": "2026-10-26T04:32:04.318255Z"
+    },
+    {
+      "id": 6,
+      "action": "RUN_FINISHED",
+      "tool_name": null,
+      "reason_summary": null,
+      "result": {
+        "outcome": "RESOLVED",
+        "closed_by": "model",
+        "tool_calls": 3,
+        "duration_ms": 3780
+      },
+      "created_at": "2026-10-26T04:32:04.329415Z"
+    }
+  ]
+}

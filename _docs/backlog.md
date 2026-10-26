@@ -37,11 +37,8 @@ file is only the map from spec id to issue number and the dependency order.
 State of every `final-project` issue, from `gh issue list --label final-project --state all`.
 Nothing was closed or edited to make this list look complete.
 
-- **Closed:** #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #14, #24, #40; follow-ups #18, #22, #27, #28, #31, #36, #47, #50.
-- **Open, merged, close pending:** #11 (PR #55 merged; real-LLM evidence on `main`; QA pending);
-  #15 (stage 1 PR #56 and the deploy-prod evidence PR #59 merged; close pending).
-- **Open, in progress:** #12 (OpenTelemetry instrumentation).
-- **Open, not started:** #13 (Grafana dashboard, alert rule, screenshots).
+- **Closed:** #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #14, #15, #24, #40; follow-ups #18, #22, #27, #28, #31, #36, #47, #50, #63.
+- **Open, merged, QA pending:** #13 (PR #66 merged as `fa6ce19`; observability evidence on `main`).
 - **Open, this issue:** #16 (README, demo, rubric evidence).
 - **Parked (deadline mode):** #44 (CIW-06.1).
 

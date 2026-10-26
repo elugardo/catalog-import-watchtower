@@ -16,11 +16,16 @@ The specification is [`_docs/spec.md`](_docs/spec.md), and the agent team
 built the project from it through public GitHub issues (see
 [AI-assisted workflow](#ai-assisted-workflow)).
 
-**State at this commit (2026-10-26).** The app, the tests, the on-call agent
-and CI/CD with dev and prod deployments are on `main`. Observability
-(OpenTelemetry, the Grafana dashboard and the Grafana alert rule, #12 and
-#13) is **not done** yet. The [Rubric evidence](#rubric-evidence) table
-gives the status of each rubric row.
+**State at this commit (2026-10-26).** Everything the rubric asks for is on
+`main`:
+- the app and the tests
+- the on-call agent with a recorded real-LLM recovery (#11)
+- OpenTelemetry (#12)
+- the Grafana dashboard and alert rule with their walkthrough (#13)
+- CI/CD with dev and prod deployments, promotion and rollback (#14, #15)
+
+#13 is merged, and its QA verdict is pending. #44 is parked. The
+[Rubric evidence](#rubric-evidence) table gives the status of each row.
 
 ## Problem
 
@@ -218,32 +223,67 @@ a few seconds while the machine wakes up.
     [40321357399](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40321357399).
 - **Evidence.** [`_docs/evidence/2026-10-26-deploy-dev/report.md`](_docs/evidence/2026-10-26-deploy-dev/report.md)
   (#14) and [`_docs/evidence/2026-10-26-deploy-prod/report.md`](_docs/evidence/2026-10-26-deploy-prod/report.md)
-  (#15). The prod report records its health and SPA checks as text, because
-  the browser tool could not take screenshots there.
+  (#15).
+- **Prod screenshots** are in the prod report:
+  [health](_docs/evidence/2026-10-26-deploy-prod/04-prod-health.png),
+  [dashboard](_docs/evidence/2026-10-26-deploy-prod/03-prod-dashboard.png),
+  the three approved runs ([N](_docs/evidence/2026-10-26-deploy-prod/01-promote-N-approved-green.png),
+  [N-1](_docs/evidence/2026-10-26-deploy-prod/02a-rollback-N-1-approved-green.png),
+  [N again](_docs/evidence/2026-10-26-deploy-prod/02b-forward-N-approved-green.png)),
+  and a run [held at the `production` gate](_docs/evidence/2026-10-26-deploy-prod/06a-promote-pending-gate.png)
+  and then [approved](_docs/evidence/2026-10-26-deploy-prod/06b-promote-approved-after-pending.png).
 - **Not done.** Branch protection with required checks on `main` is not
   set. The deploy-dev report records this.
 
 ## Observability
 
-**Not done at this commit.** OpenTelemetry instrumentation (#12, in
-progress) and the provisioned Grafana dashboard, the alert rule on
-`catalog_import_alerts_open > 0` and the screenshots (#13, not started) are
-not on `main`. What exists today:
+Both processes export OpenTelemetry traces, structured logs and metrics
+over OTLP to the local `otel-lgtm` container (Collector, Tempo, Loki,
+Prometheus, Grafana), which is provisioned from [`observability/`](observability/).
+A failed import can be followed by **one `trace_id`**. It appears on the
+attempt row, on the attempt's spans and on its log lines. Metric labels are
+low-cardinality only (`outcome`, `error_category`), and no catalog content
+goes into telemetry.
 
-- The `otel-lgtm` container runs in the local stack, and its Grafana UI is
-  at http://localhost:3000 (anonymous, no login). It has no CIW dashboard
-  or alert rule yet, and the app sends no telemetry (`OTEL_SDK_DISABLED=true`
-  by default).
-- **The user-impact alert itself is done.** It is the durable `alerts` row,
-  written when an import ends `FAILED`. The Dashboard shows it under *Open
-  incidents*, the import detail page shows it, and `GET /api/alerts`
-  returns it. This row is what wakes the on-call worker. Evidence:
-  [`_docs/evidence/2026-10-25-user-impact-alert/report.md`](_docs/evidence/2026-10-25-user-impact-alert/report.md).
-- Every attempt has a `trace_id` column. It is empty until #12 sets it.
+**It is on by default in the local stack.** `compose.yaml` sets
+`OTEL_SDK_DISABLED=false` for `app` and `oncall-agent`. Telemetry is off in
+the test overlay and on Fly. Run `docker compose up --build`, then open
+Grafana at http://localhost:3000, with anonymous access and no login.
 
-The planned reviewer path, from a failed import to its trace, logs and
-metrics through one `trace_id`, is in [`_docs/operations.md`](_docs/operations.md)
--> *Telemetry*. #13 adds the walkthrough and the screenshots.
+**Reviewer path** ([`_docs/operations.md` -> *Telemetry* -> *Reviewer path*](_docs/operations.md#telemetry-issue-09-instrumentation-in-ciw-091-12-grafana-in-ciw-092-13)):
+
+1. Upload `fixtures/valid.csv` with the Demo box ticked.
+2. Copy the failed attempt's trace id from the import detail page.
+3. In Grafana -> *Explore* -> *Tempo*, paste the trace id. The trace shows
+   `POST /api/imports` -> `catalog.import.attempt` -> `catalog.import.validate`,
+   then `catalog.import.upsert` in error.
+4. Use *Logs for this span* to open the attempt's Loki lines for the same
+   `trace_id`.
+5. The *Catalog Import Watchtower* dashboard shows the new `FAILED` step,
+   *Open alerts* rising by one, and the row in *Recent failed attempts*.
+
+**User-impact alert, in two layers**
+([`_docs/operations.md` -> *Alerting*](_docs/operations.md#alerting-issue-05-09)):
+
+- **The durable `alerts` row.** It is written when an import ends `FAILED`,
+  shown on the Dashboard and the import detail page, and it is what wakes
+  the on-call worker.
+- **The Grafana alert rule *Catalog import failed*.** It is provisioned on
+  `catalog_import_alerts_open > 0`. It fires on a failed import, returns to
+  Normal after recovery, and has no contact point.
+
+**Evidence.**
+[`_docs/evidence/2026-10-26-observability/report.md`](_docs/evidence/2026-10-26-observability/report.md)
+(#13; its QA verdict is pending) contains:
+- [Tempo trace](_docs/evidence/2026-10-26-observability/01-tempo-failed-attempt-trace.png)
+- [Loki logs for that trace](_docs/evidence/2026-10-26-observability/02-loki-logs-for-trace.png)
+- [dashboard](_docs/evidence/2026-10-26-observability/03-dashboard.png)
+- [rule firing](_docs/evidence/2026-10-26-observability/04a-rule-firing-runA.png)
+- [rule back to Normal](_docs/evidence/2026-10-26-observability/04b-rule-normal-runB.png)
+
+In that run the recovery was done by hand through the tools CLI, so there
+is no agent-run trace in it. The UI half of the alert is in
+[`_docs/evidence/2026-10-25-user-impact-alert/report.md`](_docs/evidence/2026-10-25-user-impact-alert/report.md).
 
 ## On-call agent
 
@@ -280,8 +320,10 @@ names are sent to the LLM.
   `claude-haiku-5-5` called `get_import_incident` -> `retry_failed_import`
   (attempt 2 `SUCCEEDED`) -> `resolve_alert`. The import ended `COMPLETED`
   and *Recovered*, and the folder holds the timeline screenshot and the
-  `agent_actions` export. The PR (#55) is merged. Issue #11's QA verdict is
-  pending. The trace and metric screenshots of that run wait for #13.
+  `agent_actions` export. #11 is closed.
+- That run had telemetry off, because it came before #12. The
+  observability walkthrough (#13) did its recovery by hand through the
+  tools CLI. So no screenshot shows an agent-run trace.
 - The role and the six-tool contract are in [`_docs/team/oncall-agent.md`](_docs/team/oncall-agent.md).
   The same routine for a person doing triage by hand is in
   [`.agents/skills/incident-response/SKILL.md`](.agents/skills/incident-response/SKILL.md).
@@ -322,10 +364,11 @@ independent QA -> PM approval -> merge on green CI -> close with evidence
 PM's `APPROVED`, then green CI. Marcos is not a merge gate. On 2026-10-25
 he chose **deadline mode** ([`_docs/process.md` -> *Deadline mode*](_docs/process.md#deadline-mode-from-2026-10-25)):
 CI is the full test run, two tracks run in parallel, roles are time-boxed,
-and #44 is parked. On 2026-10-26, the last day, PRs were merged on green CI
-and the QA and PM verdicts followed (#11 is an example), with anything they
-found fixed forward. `_docs/process.md` does not describe that order yet,
-so it is listed under the deviations below.
+and #44 is parked. From 2026-10-26, at Marcos's request, a PR is merged as
+soon as its CI is green after the hand-off. QA and PM approval then run on
+the merged code, a FAIL or CHANGES REQUESTED is fixed forward in a new PR,
+and the issue closes only after both verdicts are recorded. #11 was the
+first issue under this rule.
 
 **How outputs were checked.**
 
@@ -359,10 +402,16 @@ so it is listed under the deviations below.
   Marcos's account, on his written instruction. The `production`
   environment gate itself stayed active
   ([deploy-prod report](_docs/evidence/2026-10-26-deploy-prod/report.md)).
-- On 2026-10-26, PRs were merged on green CI before their QA and PM
-  verdicts (see *The gate* above).
 - Two tracks ran in parallel worktrees. One worktree agent's tools wrote
   into the other track's checkout. This was caught and corrected.
+- The engineer's tooling on #12 refused to write the smoke-report `.md`.
+  The orchestrator committed that report from the engineer's text.
+- A follow-up issue that QA tried to open with `gh issue create` was denied
+  by the tool permissions. The PM folded the finding into the open issue
+  instead.
+- #15 failed QA twice because screenshots were missing. It passed once they
+  were added
+  ([#15's comments](https://github.com/elugardo/catalog-import-watchtower/issues/15)).
 
 ## Limitations and non-goals
 
@@ -381,10 +430,10 @@ so it is listed under the deviations below.
 - **The agent is disabled in deployed environments.** The real-LLM run is
   local only, with Marcos's own key. CI uses a fake LLM.
 - **Telemetry is local only.** Nothing is exported from deployed
-  environments. At this commit observability is **not done** (#12 and #13).
+  environments. Fly sets `OTEL_SDK_DISABLED=true`.
 - **Parked:** #44 (declaring the 500 `INTERNAL_ERROR` in `openapi.yaml`)
   was parked by deadline mode.
-- **Pending rubric rows:** see the table below.
+- **Branch protection** with required checks on `main` is not set.
 
 ## Rubric evidence
 
@@ -400,11 +449,11 @@ when every artefact it names is on `main`.
 | 5 | Application | done | [`compose.yaml`](compose.yaml); [Quick start](#quick-start); [products after restart](_docs/evidence/2026-10-25-ui-detail-products/products-after-restart.jpg) |
 | 6 | Testing | done | [Tests](#tests) (the one command); [CI run on `main` 40332945673](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40332945673), [PR run 40326156089](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40326156089); [test report](_docs/evidence/2026-10-25-tests/report.md) |
 | 7 | Containerization | done | [`compose.yaml`](compose.yaml), [`Dockerfile`](Dockerfile), [`compose.test.yaml`](compose.test.yaml), [`Dockerfile.test`](Dockerfile.test) |
-| 8 | Deployment | pending | dev and prod are live ([Deployment](#deployment-and-cicd)); [ADR-0002](_docs/adr/0002-deployment-provider.md); [dev report](_docs/evidence/2026-10-26-deploy-dev/report.md) with a [health screenshot](_docs/evidence/2026-10-26-deploy-dev/05-api-health.jpg); [prod report](_docs/evidence/2026-10-26-deploy-prod/report.md). Missing: the prod health screenshots, which the prod report records only as text |
+| 8 | Deployment | done | dev and prod are live ([Deployment](#deployment-and-cicd)); [ADR-0002](_docs/adr/0002-deployment-provider.md); [dev report](_docs/evidence/2026-10-26-deploy-dev/report.md) with a [dev health screenshot](_docs/evidence/2026-10-26-deploy-dev/05-api-health.jpg); [prod report](_docs/evidence/2026-10-26-deploy-prod/report.md) with a [prod health screenshot](_docs/evidence/2026-10-26-deploy-prod/04-prod-health.png) and the [prod dashboard](_docs/evidence/2026-10-26-deploy-prod/03-prod-dashboard.png) |
 | 9 | CI/CD | done | [`.github/workflows/`](.github/workflows/); PR run [40267315673](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40267315673), dev deploy [40320919888](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40320919888), promotion [40321537500](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40321537500), rollback [40323819935](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40323819935); [*Rollback*](_docs/operations.md#rollback-issue-10); [dev](_docs/evidence/2026-10-26-deploy-dev/report.md) and [prod](_docs/evidence/2026-10-26-deploy-prod/report.md) reports |
-| 10 | Observability | pending | Missing: OpenTelemetry traces, logs and metrics sharing a `trace_id` (#12, in progress), plus the Grafana screenshots and query examples (#13, not started) |
-| 11 | Alerting on user impact | pending | done: the durable alert in the UI ([report](_docs/evidence/2026-10-25-user-impact-alert/report.md), [screenshot](_docs/evidence/2026-10-25-user-impact-alert/dashboard-open-incidents.jpg)). Missing: the provisioned Grafana rule and a screenshot of it firing (#13) |
-| 12 | On-call agent | done | [`app/oncall/`](app/oncall/); [real-LLM recovery](_docs/evidence/2026-10-26-real-llm-recovery/report.md) with [two attempts and the timeline](_docs/evidence/2026-10-26-real-llm-recovery/import-detail-attempts-and-timeline.jpg). #11's QA verdict is pending |
+| 10 | Observability | done (#13 QA pending) | [`observability/`](observability/); [walkthrough](_docs/evidence/2026-10-26-observability/report.md) with the [Tempo trace](_docs/evidence/2026-10-26-observability/01-tempo-failed-attempt-trace.png), the [Loki logs for the same `trace_id`](_docs/evidence/2026-10-26-observability/02-loki-logs-for-trace.png) and the [dashboard](_docs/evidence/2026-10-26-observability/03-dashboard.png); query cheat-sheet in [`operations.md` -> *Telemetry*](_docs/operations.md#telemetry-issue-09-instrumentation-in-ciw-091-12-grafana-in-ciw-092-13) |
+| 11 | Alerting on user impact | done (#13 QA pending) | the durable alert in the UI ([report](_docs/evidence/2026-10-25-user-impact-alert/report.md), [screenshot](_docs/evidence/2026-10-25-user-impact-alert/dashboard-open-incidents.jpg)); the provisioned rule [`ciw-alert-rules.yaml`](observability/grafana/provisioning/alerting/ciw-alert-rules.yaml), shown [firing](_docs/evidence/2026-10-26-observability/04a-rule-firing-runA.png) and [back to Normal](_docs/evidence/2026-10-26-observability/04b-rule-normal-runB.png) |
+| 12 | On-call agent | done | [`app/oncall/`](app/oncall/); [real-LLM recovery](_docs/evidence/2026-10-26-real-llm-recovery/report.md) with [two attempts and the timeline](_docs/evidence/2026-10-26-real-llm-recovery/import-detail-attempts-and-timeline.jpg) |
 
 ## Demo
 
@@ -496,10 +545,16 @@ recorded real-LLM run shows the rest.
 
 **6. Grafana, GitHub Actions, promotion and the public URL.**
 
-- **Grafana: pending.** http://localhost:3000 opens the otel-lgtm Grafana,
-  but there is no instrumentation yet (#12) and no dashboard or alert rule
-  (#13). So there is no correlated trace, logs and metrics view, and no
-  screenshot.
+- **Grafana** (http://localhost:3000) follows the
+  [reviewer path](#observability): the failed attempt's trace in Tempo
+  ([screenshot](_docs/evidence/2026-10-26-observability/01-tempo-failed-attempt-trace.png)),
+  its Loki lines by the same `trace_id`
+  ([screenshot](_docs/evidence/2026-10-26-observability/02-loki-logs-for-trace.png)),
+  the dashboard ([screenshot](_docs/evidence/2026-10-26-observability/03-dashboard.png)),
+  and the alert rule firing, then back to Normal
+  ([firing](_docs/evidence/2026-10-26-observability/04a-rule-firing-runA.png),
+  [Normal](_docs/evidence/2026-10-26-observability/04b-rule-normal-runB.png)).
+  #13's QA verdict is pending.
 - **Green runs:** CI on `main` [40332945673](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40332945673),
   PR CI [40326156089](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40326156089)
   and dev deploy [40320919888](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40320919888).
@@ -511,9 +566,9 @@ recorded real-LLM run shows the rest.
 - **Public URLs:** <https://ciw-dev.fly.dev> and <https://ciw-prod.fly.dev>.
   Their `/api/health` shows `version` `sha-<commit>` and
   `agent_enabled: false`. The dev health screenshot is
-  [`05-api-health.jpg`](_docs/evidence/2026-10-26-deploy-dev/05-api-health.jpg).
-  There is no prod screenshot: the prod report records the responses as
-  text.
+  [`05-api-health.jpg`](_docs/evidence/2026-10-26-deploy-dev/05-api-health.jpg),
+  and the prod one is
+  [`04-prod-health.png`](_docs/evidence/2026-10-26-deploy-prod/04-prod-health.png).
 
 ## More
 

@@ -69,7 +69,8 @@ Each approval's time and comment are recorded in the review history of runs
 [40323819935](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40323819935) and
 [40324903367](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40324903367).
 `GET .../actions/runs/<id>/approvals` returns `state: approved` for environment `production` on all three.
-Each run showed status `waiting` at the gate until it was approved.
+Each run showed status `waiting` at the gate until it was approved. A fourth promotion of the same
+live tag, made later only to screenshot that waiting state, is screenshot 6 below.
 
 ## Production checks
 
@@ -160,11 +161,31 @@ Observation: screenshot 5b also shows *Allow administrators to bypass configured
 ticked (GitHub's default). The gate held all three runs, and the approvals API shows a review for each,
 not a bypass.
 
-**Not captured: the run while it was still `waiting`.** That state is over; GitHub shows only the
-final page and the review history, and capturing it again would need a new promotion, which this
-evidence does not make. The waiting state is recorded by the review history above, the gap in
-screenshot 1's duration, and the approvals API (`state: approved`, environment `production`) for all
-three runs.
+**6. A promotion while it waits at the `production` gate (run
+[40344257232](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40344257232)).**
+The three runs above were screenshotted only after approval, so QA asked for the waiting state itself.
+This fourth promotion re-promoted the tag that was already live, `sha-01347b7a22a03c3ed2c1e1df9ec71872d5275ff9`
+(N), only to capture that state; prod's version did not change. It was dispatched at 14:55:42 UTC.
+
+(a) While waiting: *Validate the tag (before any approval)* is green, *Deploy to ciw-prod and
+smoke-check* shows *production waiting for review*, the run status is **Waiting**, and the banner reads
+*production require an approval to start deploying changes*. At that moment
+`GET .../actions/runs/40344257232/pending_deployments` returned the one environment `production`.
+
+![Run 40344257232 waiting: validate green, deploy job waiting for the production review](06a-promote-pending-gate.png)
+
+(b) The same run after approval: **Success** in 3m 12s (validate 6s, deploy 31s; the rest is the time
+at the gate). The review history shows `elugardo` approved `production` with the comment *Approved by
+the orchestrator under Marcos's account on his written instruction (2026-10-26): re-promotion of the
+live tag to capture the pending-gate screenshot.*
+
+![Run 40344257232 after approval: Success, production approved with the orchestrator's comment](06b-promote-approved-after-pending.png)
+
+The approval was given by the orchestrator through the GitHub pending-deployments API under Marcos's
+account, on his written instruction; the engineer who took the screenshots did not approve it.
+Afterwards `https://ciw-prod.fly.dev/api/health` still returned
+`{"status":"ok","db":"ok","agent_enabled":false,"version":"sha-01347b7a22a03c3ed2c1e1df9ec71872d5275ff9"}`.
+
 ## Docs changed with this evidence
 
 - `_docs/operations.md` -> *Rollback*: the **Migrations.** paragraph is replaced with the PM's

@@ -76,7 +76,7 @@ def test_get_import_attempts_works_on_an_import_with_no_alert(client, migrated_e
     assert action_count(migrated_engine) == before  # no alert, no audit row
 
 
-def test_get_import_diagnostics_returns_placeholders(client, migrated_engine, ns):
+def test_get_import_diagnostics_returns_the_explore_queries(client, migrated_engine, ns):
     body = injected(client, ns.name())
 
     result = get_import_diagnostics(body["id"])
@@ -86,7 +86,9 @@ def test_get_import_diagnostics_returns_placeholders(client, migrated_engine, ns
         "outcome": "DONE",
         "import_id": body["id"],
         "diagnostics": {
-            "log_query": f"PLACEHOLDER log query: import_id={body['id']}",
+            "log_query": (
+                '{service_name=~"ciw-app|ciw-oncall-agent"} | import_id="' + str(body["id"]) + '"'
+            ),
             "trace_query": None,
         },
         "attempt_count": 1,
@@ -94,7 +96,7 @@ def test_get_import_diagnostics_returns_placeholders(client, migrated_engine, ns
         "validation_error_count": 0,
     }
 
-    # Once the latest attempt has a trace id (#12), the trace query names it.
+    # Once the latest attempt has a trace id (#12), the trace query is that id (Explore -> Tempo).
     trace_id = "0123456789abcdef0123456789abcdef"
     with migrated_engine.begin() as connection:
         connection.execute(
@@ -102,7 +104,7 @@ def test_get_import_diagnostics_returns_placeholders(client, migrated_engine, ns
             {"t": trace_id, "i": body["id"]},
         )
     with_trace = get_import_diagnostics(body["id"])["diagnostics"]
-    assert with_trace["trace_query"] == f"PLACEHOLDER trace query: trace_id={trace_id}"
+    assert with_trace["trace_query"] == trace_id
 
 
 @pytest.mark.parametrize("value", UNKNOWN_IDS, ids=str)

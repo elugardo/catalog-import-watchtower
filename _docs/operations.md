@@ -22,16 +22,18 @@ with safe placeholders. The app runs with none of the optional ones set.
 | `OTEL_SERVICE_NAME` | app, oncall-agent | no | `compose.yaml` sets `ciw-app` and `ciw-oncall-agent`; the CLI (`python -m app.oncall tools …`) uses its container's value; unset, each process uses its own name |
 | `APP_PORT` | compose | no | host port for the app (default 8000) |
 | `DB_PORT` | compose | no | host port for the database (default 5432); the containers always use `db:5432` |
+| `GRAFANA_PORT` | compose | no | host port for Grafana in `otel-lgtm` (default 3000), so a second Compose project (`-p <name>`) runs beside the default one with no override file |
 | `APP_VERSION` | image **build argument** (`ARG APP_VERSION=dev` in the Dockerfile, passed by `compose.yaml` → `build.args`); also read as an env var by `app.settings` | no (default `dev`) | becomes `version` on `/api/health`; `APP_VERSION=abc123 docker compose build` bakes `abc123` into the image; CI sets it to the commit SHA (issue 10) |
 | `STATIC_DIR` | app | no (default `app/static`) | folder of the built SPA that `/` serves; only needed when running uvicorn on the host against a bundle elsewhere |
 
-## Local stack *(issue 09 adds dashboards and the alert rule)*
+## Local stack
 
 ```
 docker compose up --build             # app :8000 (SPA + API), db :5432, Grafana :3000, idle worker
 docker compose up --build -d --wait   # detached; returns once app is healthy, i.e. /api/health says db: ok
 APP_PORT=8081 docker compose up       # app on host port 8081 instead of 8000
 DB_PORT=5433 docker compose up        # db on host port 5433 when a local PostgreSQL owns 5432
+GRAFANA_PORT=3001 docker compose up   # Grafana on host port 3001 (e.g. a second project with -p)
 docker compose down                   # stop; the database volume survives
 docker compose down -v                # stop and drop the data volume
 ```
@@ -49,7 +51,7 @@ default); it recovers by itself when `db` is back.
 |---|---|---|
 | app | http://localhost:8000 and http://localhost:8000/api/health | SPA and API, same origin; any non-`/api` path serves the SPA (history fallback); unknown `/api/...` is a 404 in the error shape |
 | db | `localhost:5432` (`DB_PORT`), user / password / database `ciw` / `ciw` / `ciw` | PostgreSQL 16; named volume `pgdata` |
-| Grafana | http://localhost:3000 (health: `/api/health`) | `grafana/otel-lgtm`; anonymous admin, no login form; dashboard and alert rule arrive with issue 09 |
+| Grafana | http://localhost:3000 (`GRAFANA_PORT`; health: `/api/health`) | `grafana/otel-lgtm:0.38.0` (Grafana 13.2.4, digest `sha256:75cdf892daffadf3763ef61c16a6d7f8586216fce0b40bba7874a0b053121084`), pinned in `compose.yaml`; bumping it: `_docs/architecture.md`. Anonymous admin, no login form. Provisioned from `observability/` with no manual step: the dashboard *Catalog Import Watchtower* (`/d/ciw-overview`) and the alert rule *Catalog import failed* (folder *CIW alerts*); the datasources are the image's built-in `prometheus`, `loki`, `tempo` |
 | otel-lgtm (OTLP) | `otel-lgtm:4318` inside the network, no host port | `app` and `oncall-agent` export to it (telemetry on by default in Compose) and depend on it being *started*, not healthy, so its slow cold start never holds them up; until it answers, export fails in the background and requests are not slowed |
 | oncall-agent | `docker compose logs -f oncall-agent` | no port; logs are JSON lines on stderr; without credentials it logs one line, `oncall-agent: idle because <reason>` (`AGENT_ENABLED is not true`, `LLM_PROVIDER is not anthropic`, `ANTHROPIC_API_KEY is not set` or `LLM_MODEL is not set`; never a value), and claims nothing. With them it logs `polling every <n>s (provider anthropic, model <model>)`, then one line per claim and per finished run |
 
@@ -60,7 +62,7 @@ answers 404 `NOT_FOUND` until a bundle exists under `app/static/`), and
 `npm run build` in `web/` writes `web/dist/`, which the Dockerfile copies to
 `app/static/`.
 
-## Telemetry *(issue 09: instrumentation in CIW-09.1, Grafana in CIW-09.2)*
+## Telemetry *(issue 09: instrumentation in CIW-09.1 #12, Grafana in CIW-09.2 #13)*
 
 `app/telemetry.py` sets up the OpenTelemetry SDK in both processes, with
 OTLP/HTTP export to `OTEL_EXPORTER_OTLP_ENDPOINT` when `OTEL_SDK_DISABLED`
@@ -105,8 +107,13 @@ collector never slows a request. Tests install in-memory exporters through
     auto-instrumentation (a database error's text would quote row values).
 - **Trace id on the attempt:** the attempt span's trace id (32 lowercase hex)
   is written to `import_attempts.trace_id` when the attempt starts and
-  returned by `GET /api/imports/{id}`; `get_import_diagnostics` returns a
-  `trace_query` for it (placeholder text until #13).
+  returned by `GET /api/imports/{id}`. `get_import_diagnostics` returns two
+  strings that paste into Grafana Explore as they are, and that contain only
+  ids: `log_query`, the LogQL
+  `{service_name=~"ciw-app|ciw-oncall-agent"} | import_id="<import id>"`
+  (that import's lines from both services), and `trace_query`, the latest
+  attempt's trace id, which Explore -> Tempo opens as that trace (`null`
+  when the attempt has no trace id, i.e. telemetry was off).
 - **Logs:** both processes write JSON lines to stderr, one object per line:
   `timestamp` (UTC ISO 8601, `Z`), `level`, `logger`, `message`, `trace_id`
   and `span_id` (absent outside a span), and where the code has them
@@ -132,6 +139,13 @@ collector never slows a request. Tests install in-memory exporters through
   response had already started, uvicorn adds its own one-line
   `ASGI callable returned without completing response`, also type-free).
   Uvicorn access lines (method, path, status) stay.
+
+  **Plain-text lines that never reach Loki.** uvicorn's startup and access
+  lines and Alembic's migration lines (`alembic upgrade head` in the
+  entrypoint) are plain text, written by their own handlers, and are not
+  exported over OTLP: they show only in `docker compose logs app`. Only the
+  app's own loggers (the root logger that `app/telemetry.py` sets up, in
+  `app` and `oncall-agent`) write JSON lines and reach Loki.
 - **Metrics** (OTel instrument → Prometheus series in otel-lgtm):
   - `catalog.import.attempts` → `catalog_import_attempts_total{outcome, error_category}`:
     `outcome` `SUCCEEDED` / `FAILED`, `error_category` one of the three codes
@@ -160,15 +174,67 @@ collector never slows a request. Tests install in-memory exporters through
   (Collector, Prometheus, Loki, Tempo, Grafana), provisioned from
   `observability/`. Deployed environments export nothing unless ADR-0002
   adds a hosted backend; the rubric is satisfied by the local stack.
-- **Dashboard:** imports by outcome, attempt duration, open alerts, agent
-  runs by outcome, recent failed-attempt trace ids.
-- **Reviewer path:** from a failed import's detail page, copy the trace id →
-  Grafana Explore → Tempo trace → its logs in Loki → the metric panel that
-  moved. Screenshot of each stored under `_docs/evidence/`.
+- **Dashboard** *Catalog Import Watchtower* (`observability/grafana/dashboards/catalog-import-watchtower.json`,
+  uid `ciw-overview`, refreshes every 30 s). Each panel's description names
+  its query source:
+  - *Imports by outcome* (Prometheus, `catalog_import_attempts_total` by
+    `outcome`, `error_category`);
+  - *Attempt duration (p50, p95)* (Prometheus, `catalog_import_duration_seconds_bucket` by `outcome`);
+  - *Open alerts* (Prometheus, `catalog_import_alerts_open`, with the rule's
+    threshold drawn);
+  - *Products upserted* (Prometheus, `catalog_products_upserted_total`);
+  - *Agent runs by outcome* (Loki: counts of the worker's
+    `run on alert <n> finished: <outcome>` line; no metric exists for runs).
+    Empty while the worker is disabled or has no key;
+  - *Recent failed attempts* (Loki: the `import <id> attempt <n> failed:
+    <code>` lines of both services as a table of time, `import_id`,
+    `attempt_number`, code and `trace_id`; a trace id links to Explore ->
+    Tempo, or paste it there).
 
-Query cheat-sheet (fill in, #13): Loki by `import_id` (structured
-metadata, e.g. `{service_name="ciw-app"} | import_id="1"`) or `trace_id`;
-Tempo by trace id or `catalog.import.id`; PromQL for each series above.
+  No panel shows or filters by catalog content, and no metric query groups
+  by an id (none exists as a label). The counters are cumulative per
+  process: attempt 1 is counted by `ciw-app`, a retry by `ciw-oncall-agent`
+  (the worker, or the CLI, whose short-lived series drops out of an instant
+  query about 5 minutes after the call, Prometheus's lookback). Metrics are
+  exported every 60 s, so a panel moves up to a minute after the event.
+- **Reviewer path** (the evidence run:
+  `_docs/evidence/2026-10-26-observability/report.md`):
+  1. Open the failed import's detail page in the app (http://localhost:8000)
+     and copy the trace id of the failed attempt (attempt 1).
+  2. Grafana (http://localhost:3000) -> *Explore* -> datasource *Tempo* ->
+     *TraceQL*, paste the trace id, run. The trace shows `POST /api/imports`
+     -> `catalog.import.attempt` -> `catalog.import.validate` and
+     `catalog.import.upsert` in `ERROR` (for the synthetic injector).
+  3. On the `catalog.import.attempt` (or `upsert`) span, *Logs for this
+     span* opens Loki with `{service_name="ciw-app"} | trace_id = "<id>"`:
+     the attempt's lines (`import <id> created`, `... failed: <code>`, the
+     alert line).
+  4. *Dashboards* -> *Catalog Import Watchtower*: *Imports by outcome* has a
+     new `FAILED / <code>` step, *Open alerts* went up by one, and the
+     import is a row of *Recent failed attempts*. *Alerting* -> *Alert
+     rules* shows *Catalog import failed* firing.
+  5. After recovery, *Open alerts* goes back down and the rule returns to
+     *Normal* (within about 2 minutes: 60 s export, 10 s evaluation, 20 s
+     pending).
+
+**Query cheat-sheet.** Copied from the dashboard and Explore of the
+evidence run; paste into Explore with the named datasource. The ids are
+the only variable parts.
+
+| What | Datasource | Query |
+|---|---|---|
+| logs of one import, both services | Loki | `{service_name=~"ciw-app\|ciw-oncall-agent"} \| import_id="<import id>"` (what `get_import_diagnostics` returns as `log_query`) |
+| logs of one trace | Loki | `{service_name="ciw-app"} \| trace_id = "<trace id>"` (what *Logs for this span* opens; use `ciw-oncall-agent` for an agent run or a CLI retry) |
+| failed-attempt lines | Loki | `{service_name=~"ciw-app\|ciw-oncall-agent"} \|~ "^import [0-9]+ attempt [0-9]+ failed: " \| regexp "failed: (?P<code>[A-Z_]+)"` |
+| agent runs by outcome | Loki | `sum by (outcome) (count_over_time({service_name="ciw-oncall-agent"} \|~ "run on alert [0-9]+ finished: " \| regexp "finished: (?P<outcome>[A-Z_]+) after" [$__auto]))` |
+| one trace by id | Tempo (TraceQL) | `<trace id>` (32 hex characters; what `get_import_diagnostics` returns as `trace_query`) |
+| failed attempts | Tempo (TraceQL) | `{ name = "catalog.import.attempt" && span.catalog.import.outcome = "FAILED" }` |
+| the attempts of one import | Tempo (TraceQL) | `{ name = "catalog.import.attempt" && span.catalog.import.id = <import id> }` |
+| attempts by outcome | Prometheus | `sum by (outcome, error_category) (catalog_import_attempts_total)` |
+| attempt duration p95 | Prometheus | `histogram_quantile(0.95, sum by (le, outcome) (catalog_import_duration_seconds_bucket))` |
+| products upserted | Prometheus | `sum(catalog_products_upserted_total)` |
+| open alerts (the rule's query) | Prometheus | `max(catalog_import_alerts_open)` |
+
 The local smoke check of CIW-09.1 is in
 `_docs/evidence/2026-10-26-telemetry-smoke/report.md`.
 
@@ -217,11 +283,34 @@ Two layers, both required:
    real storage outage and there is no environment variable for it. Each
    alert write logs one line with `alert_id`, `import_id`, the code and the
    attempt number only.
-2. **The visible alert** is a Grafana alert rule on
-   `catalog_import_alerts_open > 0`, provisioned from
-   `observability/grafana/provisioning/alerting/`, with a dashboard link in
-   its annotations. It is what a reviewer watches fire. It has no contact
-   point and no webhook; it wakes nothing.
+2. **The visible alert** is the Grafana alert rule *Catalog import failed*
+   (folder *CIW alerts*), provisioned from
+   `observability/grafana/provisioning/alerting/ciw-alert-rules.yaml`. It is
+   what a reviewer watches fire. It has no contact point, no notification
+   policy, no webhook and no email; it wakes nothing.
+
+   - **Query and condition.** `max(catalog_import_alerts_open)`, one
+     aggregated series, then `$A > 0`: two open alerts give one firing
+     instance whose value is 2. Evaluated every 10 s (a multiple of
+     Grafana's scheduler tick), pending 20 s. With the 60 s metric export it
+     fires within about 90 s of a failed import and returns to Normal within
+     about 90 s of the last open alert closing.
+   - **No data and error are Normal.** A fresh stack before the first export
+     and a stopped `db` (the gauge then reports no value) give no data, and
+     the rule stays Normal instead of firing.
+   - **What it tracks: open incidents**, `OPEN` + `IN_PROGRESS` alerts. It
+     therefore also returns to Normal when the worker escalates an alert to
+     `NEEDS_ATTENTION`, exactly as for `RESOLVED`. Escalated alerts stay
+     visible in the app (the dashboard and the import detail page), not in
+     Grafana. An alert that stays `OPEN` keeps it firing: with the worker
+     disabled, a `VALIDATION_ERROR` alert (which a human cannot close, since
+     `mark_needs_attention` needs a claim and `resolve_alert` a `COMPLETED`
+     import) keeps it firing until the worker runs.
+   - **Leftover alerts in the volume** fire it as soon as the stack starts,
+     which is why the walkthrough starts from `docker compose down -v`.
+   - **Annotations:** a summary with no ids and no catalog content, the open
+     count, a link to the dashboard (`__dashboardUid__` `ciw-overview`, panel
+     *Open alerts*) and `runbook_url` `_docs/operations.md#runbook`.
 
 ## Secrets
 
@@ -537,3 +626,22 @@ printing anything: `docker compose exec -T app sh -c 'test -z "$ANTHROPIC_API_KE
 | import stuck `PROCESSING` | `docker compose logs app`: a 500 on `POST /api/imports` leaves `unhandled <ExceptionClass> in POST /api/imports`, and when the failure write was what failed, the line before it is `import <id> attempt <n> failed: <code> (<ExceptionClass>)`, which names the import (type-only lines, no traceback) | the startup sweep marks it `FAILED` / `INTERNAL_ERROR` on the next start and raises its alert (`INTERNAL_ERROR (found PROCESSING at startup)`; an existing alert keeps its status); `docker compose restart app` |
 | no traces in Grafana | otel-lgtm logs; `OTEL_EXPORTER_OTLP_ENDPOINT` | fix endpoint; `docker compose restart app oncall-agent` |
 | deploy green but site down | provider health check, migrations job log | roll back to previous tag (above) |
+| Grafana rule *Catalog import failed* firing | *Open alerts* panel; the app's import list | a failed import's alert is `OPEN` or `IN_PROGRESS`: triage it (*triage by hand* above, or let the worker run); it returns to Normal about 90 s after the last one closes or is escalated |
+
+**Stopping the worker during a run.** Stopping or recreating
+`oncall-agent` (`docker compose stop`, `up -d` after a change) gives the
+process Docker's default 10 s stop grace, while a run may last up to
+`AGENT_TIMEOUT_SECONDS` (120 s), so a run still going is killed. Its alert
+stays `IN_PROGRESS` until the stale-claim reset, after
+`AGENT_CLAIM_TIMEOUT_SECONDS` (300 s), returns it to `OPEN`; the next run
+then follows the policy table of `_docs/team/oncall-agent.md`. An attempt 2
+that was running when the worker was killed stays as it was committed:
+import `PROCESSING`, attempt 2 `RUNNING`. Nothing in the worker ends it;
+the next start of `app` runs the startup sweep, which marks it `FAILED` /
+`INTERNAL_ERROR` and updates the alert's reason (its status is kept). The
+retry budget is spent (two attempts exist), so the next run cannot retry
+and escalates the alert to `NEEDS_ATTENTION`. The operator avoids all of
+this by stopping the worker while no alert is `IN_PROGRESS`. The 120 s
+bound is checked between steps and is passed to each provider request as
+the SDK's per-request `timeout` (only what is left of it), so it is not a
+hard wall-clock kill of one slow response.

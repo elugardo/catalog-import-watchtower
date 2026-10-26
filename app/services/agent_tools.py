@@ -115,10 +115,13 @@ MAX_AUDIT_RESULT_BYTES = 2048
 RETRYABLE_CODE = "TRANSIENT_STORAGE_TIMEOUT"
 RETRY_ATTEMPT_NUMBER = 2
 
-# Placeholders until the observability queries land (#13). They contain fixed
-# text and the two ids only.
-LOG_QUERY_PLACEHOLDER = "PLACEHOLDER log query: import_id={import_id}"
-TRACE_QUERY_PLACEHOLDER = "PLACEHOLDER trace query: trace_id={trace_id}"
+# The diagnostics query strings (`_docs/operations.md` -> *Telemetry*, query
+# cheat-sheet), paste-able into Grafana Explore. They contain fixed text and the
+# ids only. Loki: that import's lines from both services, by the `import_id`
+# structured metadata. Tempo: the trace id itself, which Explore -> Tempo opens
+# as that trace.
+LOG_QUERY_TEMPLATE = '{{service_name=~"ciw-app|ciw-oncall-agent"}} | import_id="{import_id}"'
+TRACE_QUERY_TEMPLATE = "{trace_id}"
 _TRACE_ID_RE = re.compile(r"[0-9a-f]{32}")
 
 TOOL_NAMES = (
@@ -220,15 +223,15 @@ def attempts_payload(record: ImportFacts, attempts: Sequence[AttemptFacts]) -> d
 
 
 def diagnostics_payload(record: ImportFacts, attempts: Sequence[AttemptFacts]) -> dict[str, Any]:
-    """Placeholder query strings until #13; `trace_query` is null without a trace id."""
+    """LogQL for the import, the latest attempt's trace id for Tempo (null without one)."""
     latest = max(attempts, key=lambda a: a.attempt_number, default=None)
     trace_id = _trace_id(latest.trace_id) if latest is not None else None
     return {
         "import_id": record.id,
         "diagnostics": {
-            "log_query": LOG_QUERY_PLACEHOLDER.format(import_id=record.id),
+            "log_query": LOG_QUERY_TEMPLATE.format(import_id=record.id),
             "trace_query": (
-                TRACE_QUERY_PLACEHOLDER.format(trace_id=trace_id) if trace_id is not None else None
+                TRACE_QUERY_TEMPLATE.format(trace_id=trace_id) if trace_id is not None else None
             ),
         },
         "attempt_count": len(attempts),

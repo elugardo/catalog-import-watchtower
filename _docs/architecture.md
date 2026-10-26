@@ -40,8 +40,19 @@ browser ──▶ app (FastAPI: SPA at /, API at /api) ──▶ db (Postgres)
   service layer directly; there is no internal HTTP API and no token.
 - **db** is the system of record for statuses, attempts, alerts, the audit
   timeline and the bounded source CSV.
-- **otel-lgtm** receives OTLP from both processes; dashboards and the alert
-  rule are provisioned from `observability/`.
+- **otel-lgtm** receives OTLP from both processes; the dashboard and the alert
+  rule are provisioned from `observability/` (CIW-09.2); its datasources are the
+  image's built-in ones (uids `prometheus`, `loki`, `tempo`).
+
+  **The image is pinned** in `compose.yaml` (`grafana/otel-lgtm:0.38.0`, Grafana
+  13.2.4), never `latest`, because the provisioning depends on the image's
+  layout (`/otel-lgtm/grafana/conf/provisioning/...`), its datasource uids and
+  its Grafana version. To bump it: change the tag in `compose.yaml`; run
+  `uv run pytest tests/unit/test_observability_provisioning.py`; re-run the
+  walkthrough of `_docs/evidence/2026-10-26-observability/report.md` on a fresh
+  project (`down -v`, `up --build -d --wait`, the provisioning API checks, the
+  rule firing and back to Normal, the trace -> logs path); then update the
+  version here and in `_docs/operations.md` -> *Local stack*.
 
 ## Folder layout
 
@@ -83,7 +94,8 @@ web/                   Vite project (react-router-dom; no other runtime dependen
                        disabled"), ImportTable, ValidationErrors, ErrorText, Health (context + footer), useRequest
   src/format.ts        shared formatters (UTC timestamps, integer-cents prices)
   src/__tests__/       Vitest + Testing Library, fetch stubbed
-observability/         otel-lgtm config, Grafana provisioning (datasource, dashboard JSON, alert rule)
+observability/         Grafana provisioning mounted into otel-lgtm: grafana/provisioning/dashboards/ciw.yaml (provider),
+                       grafana/dashboards/catalog-import-watchtower.json, grafana/provisioning/alerting/ciw-alert-rules.yaml
 fixtures/              valid.csv, update.csv, invalid.csv (+ edge-case files used by tests)
 Dockerfile             stage 1: node builds web/ → stage 2: python image with app/ and app/static/
 compose.yaml           app, oncall-agent, db, otel-lgtm; .env for secrets

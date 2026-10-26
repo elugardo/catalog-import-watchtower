@@ -91,14 +91,21 @@ services:
 
   otel-lgtm:
     # OpenTelemetry Collector + Prometheus + Loki + Tempo + Grafana in one
-    # container. Provisioning, dashboards and the alert rule arrive with CIW-09.2.
-    image: grafana/otel-lgtm:latest
+    # container. Pinned to the version the provisioning in observability/ was
+    # checked against (Grafana 13.2.4); to bump it, see _docs/architecture.md.
+    image: grafana/otel-lgtm:0.38.0
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      # Single files and a separate folder, next to the image's own provisioning,
+      # so its built-in datasources (uids prometheus, loki, tempo) stay as they are.
+      - ./observability/grafana/provisioning/dashboards/ciw.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ciw.yaml:ro
+      - ./observability/grafana/provisioning/alerting/ciw-alert-rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/ciw-alert-rules.yaml:ro
+      - ./observability/grafana/dashboards:/otel-lgtm/ciw-dashboards:ro
     healthcheck:
       # The image's own check, with a start period: on a slow cold start the
       # bundled services need more than its 3 x 30 s before they all answer,

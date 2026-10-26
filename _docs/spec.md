@@ -197,7 +197,7 @@ Implement automated **unit tests** for CSV parsing, header validation, price/qua
 
 - Public GitHub repository with documentation in English and a **public GitHub Issues** backlog. Each issue has acceptance criteria and links to the relevant commits/PRs; record evidence that agents used the issues.
 - On every PR: backend unit and integration tests, frontend tests/build, and container build checks.
-- On merge/push to `main`: build the single application image, tag it `sha-<commit>` (plus a moving `dev` tag for convenience), push to GHCR, automatically deploy to **development** and smoke-check `/api/health`. Migrations run from the container entrypoint on start.
+- On merge/push to `main`: build the single application image, tag it `sha-<commit>` (plus a moving `dev` tag for convenience), push to GHCR, automatically deploy to **development** and smoke-check `/api/health`. Migrations run from Fly's `release_command` on deploy; the entrypoint also runs them, so the Compose stack migrates on start and on Fly that second run is a no-op.
 - Production is a separate environment/database. A manually triggered GitHub Actions workflow **promotes the exact tested image tag** from development to production (no rebuild).
 - Document a rollback path to the previous image SHA, including what happens to database migrations. Keep schema changes backward-compatible for the MVP.
 - Provide public URLs (preferably dev and prod), environment-specific health checks, and a short deployment walkthrough or demo recording.

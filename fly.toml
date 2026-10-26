@@ -1,0 +1,56 @@
+# Fly.io config for the development app `ciw-dev` (CIW-10.1, ADR-0002).
+# Deployed only by .github/workflows/deploy-dev.yml with
+#   flyctl deploy -a ciw-dev --image ghcr.io/elugardo/catalog-import-watchtower:sha-<SHA>
+# so Fly never builds anything: there is no [build] section on purpose.
+# No secret lives here. DATABASE_URL is a Fly secret on ciw-dev only
+# (`_docs/operations.md` -> Deployment). Production (#15) gets its own file.
+
+app = "ciw-dev"
+primary_region = "ewr"
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[deploy]
+  # Authoritative migration step on Fly: runs once per deploy, in a temporary
+  # machine, before any new app machine starts. A failing migration fails the
+  # deploy and the previous release keeps serving. The image CMD runs
+  # `alembic upgrade head` again at machine start; here that is a no-op.
+  release_command = "alembic upgrade head"
+  strategy = "rolling"
+
+[env]
+  # Deployed environments never run the LLM agent; alerts show
+  # "automated recovery disabled" (ADR-0002). Telemetry export is off on Fly.
+  AGENT_ENABLED = "false"
+  OTEL_SDK_DISABLED = "true"
+  DATABASE_CONNECT_TIMEOUT_SECONDS = "5"
+
+[processes]
+  # Same command as the Dockerfile CMD (migrate, then serve).
+  app = "sh -c 'alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000'"
+  # Defined so the group exists, but ciw-dev runs ZERO worker machines: with
+  # AGENT_ENABLED=false the worker would only idle. The deploy workflow passes
+  # `--process-groups app` and then scales `worker` to 0. To run it anyway:
+  # `flyctl scale count worker=1 -a ciw-dev` (operations.md -> Deployment).
+  worker = "python -m app.oncall"
+
+[http_service]
+  processes = ["app"]
+  internal_port = 8000
+  force_https = true
+  # Stop when idle, wake on the next request (Marcos: stop when idle).
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+
+[[vm]]
+  processes = ["app", "worker"]
+  size = "shared-cpu-1x"
+  memory = "512mb"

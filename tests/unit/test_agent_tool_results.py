@@ -184,14 +184,12 @@ def test_the_attempts_and_diagnostics_keys():
     assert list(diagnostics) == list(tools.DIAGNOSTICS_KEYS)
     # The latest attempt (2) has no usable trace id, so there is no trace query.
     assert diagnostics["diagnostics"] == {
-        "log_query": "PLACEHOLDER log query: import_id=41",
+        "log_query": '{service_name=~"ciw-app|ciw-oncall-agent"} | import_id="41"',
         "trace_query": None,
     }
 
     attempts[0].trace_id = "cd" * 16
-    assert tools.diagnostics_payload(record, attempts)["diagnostics"]["trace_query"] == (
-        "PLACEHOLDER trace query: trace_id=" + "cd" * 16
-    )
+    assert tools.diagnostics_payload(record, attempts)["diagnostics"]["trace_query"] == ("cd" * 16)
 
 
 def test_timestamps_are_utc_with_z():

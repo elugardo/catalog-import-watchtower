@@ -244,9 +244,9 @@ writes nothing.
   `attempts[]`, for an import in any status, with or without an alert.
 - `get_import_diagnostics(import_id)`: `import_id`, `diagnostics { log_query,
   trace_query }`, `attempt_count`, `row_count`, `validation_error_count`.
-  **The two strings are placeholders** until the observability queries land
-  (#13): fixed text plus the import id and the latest attempt's `trace_id`.
-  `trace_query` is `null` while that attempt has no `trace_id`.
+  `log_query` is the LogQL `{service_name=~"ciw-app|ciw-oncall-agent"} | import_id="<id>"`;
+  `trace_query` is the latest attempt's `trace_id` (Explore -> Tempo opens it),
+  `null` while that attempt has none. Ids only (`_docs/operations.md` -> *Telemetry*).
 - `retry_failed_import`, `mark_needs_attention`, `resolve_alert`: the
   incident keys, after the call (`alert_id` and `alert_status` are `null` for
   an import with no alert).

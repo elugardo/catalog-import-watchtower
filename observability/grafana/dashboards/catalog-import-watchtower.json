@@ -1,0 +1,191 @@
+{
+  "uid": "ciw-overview",
+  "title": "Catalog Import Watchtower",
+  "description": "Imports, attempts, open alerts and agent runs (CIW-09.2). Ids, codes and counts only: no catalog content. Queries: _docs/operations.md -> Telemetry.",
+  "tags": ["ciw"],
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "utc",
+  "annotations": { "list": [] },
+  "templating": { "list": [] },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Imports by outcome",
+      "description": "Prometheus: sum by (outcome, error_category) (catalog_import_attempts_total). Attempts ended, cumulative since each process started (attempt 1 in ciw-app; a retry in ciw-oncall-agent).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (outcome, error_category) (catalog_import_attempts_total)",
+          "legendFormat": "{{outcome}} / {{error_category}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0, "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "showPoints": "always", "pointSize": 5 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Attempt duration (p50, p95)",
+      "description": "Prometheus: histogram_quantile(0.5 | 0.95, sum by (le, outcome) (catalog_import_duration_seconds_bucket)), over all attempts since each process started.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.5, sum by (le, outcome) (catalog_import_duration_seconds_bucket))",
+          "legendFormat": "p50 {{outcome}}",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, outcome) (catalog_import_duration_seconds_bucket))",
+          "legendFormat": "p95 {{outcome}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0, "custom": { "drawStyle": "line", "showPoints": "always", "pointSize": 5 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Open alerts",
+      "description": "Prometheus: max(catalog_import_alerts_open), the OPEN + IN_PROGRESS alerts reported by ciw-app. The rule 'Catalog import failed' fires while this is above 0.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max(catalog_import_alerts_open)",
+          "legendFormat": "open alerts",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "showPoints": "always", "pointSize": 5, "thresholdsStyle": { "mode": "line" } },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Products upserted",
+      "description": "Prometheus: sum(catalog_products_upserted_total), products written by committed attempts, cumulative since each process started (a failed attempt adds 0).",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(catalog_products_upserted_total)",
+          "legendFormat": "products upserted",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0, "min": 0, "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "showPoints": "always", "pointSize": 5 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Agent runs by outcome",
+      "description": "Loki: counts of the worker's 'oncall-agent: run on alert <n> finished: <outcome>' line (service ciw-oncall-agent), by outcome. Empty while the worker is disabled or idle.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (outcome) (count_over_time({service_name=\"ciw-oncall-agent\"} |~ \"run on alert [0-9]+ finished: \" | regexp \"finished: (?P<outcome>[A-Z_]+) after\" [$__auto]))",
+          "legendFormat": "{{outcome}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0, "min": 0, "custom": { "drawStyle": "bars", "fillOpacity": 80, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Recent failed attempts",
+      "description": "Loki: the 'import <id> attempt <n> failed: <code>' lines of both services, newest first. Click a trace_id to open it in Tempo, or paste it into Explore -> Tempo.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{service_name=~\"ciw-app|ciw-oncall-agent\"} |~ \"^import [0-9]+ attempt [0-9]+ failed: \" | regexp \"failed: (?P<code>[A-Z_]+)\"",
+          "queryType": "range",
+          "maxLines": 50
+        }
+      ],
+      "transformations": [
+        { "id": "extractFields", "options": { "source": "labels", "format": "auto", "replace": false, "keepTime": true } },
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": { "Time": true, "import_id": true, "attempt_number": true, "code": true, "trace_id": true },
+            "indexByName": { "Time": 0, "import_id": 1, "attempt_number": 2, "code": 3, "trace_id": 4 },
+            "renameByName": { "Time": "time" }
+          }
+        },
+        { "id": "sortBy", "options": { "sort": [ { "field": "time", "desc": true } ] } }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "trace_id" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open this trace in Tempo",
+                    "url": "/explore?orgId=1&schemaVersion=1&panes=%7B%22t%22%3A%7B%22datasource%22%3A%22tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22tempo%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22${__value.raw}%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-6h%22%2C%22to%22%3A%22now%22%7D%7D%7D"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": false } }
+    }
+  ]
+}

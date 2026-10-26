@@ -174,6 +174,25 @@ issue rather than the diff catches the gap. It costs more time and tokens than
 one engineer in one session; this project spends it because the rubric scores
 the evidence of exactly this.
 
+## Deadline mode (from 2026-10-25)
+
+On 2026-10-25 Marcos chose four changes so the backlog fits the submission
+deadline of 2026-10-26. Every role and gate stays: groom, implement, code
+review, QA, PM approval, merge on green CI, close with evidence.
+
+- **CI is the full run.** After CIW-08.1 a local run of the one test command
+  takes about 15 minutes, while CI's `Tests` job takes under 2. Engineers and
+  QA run the focused tests for their slice locally; the green CI run of the
+  one command on the PR head counts as the full run.
+- **Two tracks in parallel.** Track A is #11 → #12 → #13 in the main checkout;
+  track B is #14 → #15 in a separate git worktree. #16 runs last. This
+  replaces "one issue per session" until submission.
+- **Time-boxed roles.** Grooming of an already-detailed issue is short; QA
+  checks the acceptance criteria and the edge cases the spec names, without
+  open-ended extra hunts; PM approval is a quick check of the record.
+- **#44 is parked.** CIW-06.1 earns no rubric points and runs only if time
+  remains.
+
 ## Order and dependencies
 
 From spec §13: start with 01; finish 02, 03, 04 and 06 before any visual

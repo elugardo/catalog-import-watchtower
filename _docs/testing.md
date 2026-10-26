@@ -100,7 +100,11 @@ run (test image built with no cache, empty volume, base images already
 pulled) takes about 2.5 minutes (25 s build, about 2 minutes of tests); the
 first pull of the `python`, `node`, `uv` and `postgres` base images adds a few
 minutes once. A warm run (image cached, `db` up) takes about 1.5 minutes,
-most of it the integration layer (about 1 minute).
+most of it the integration layer (about 1 minute). Since PR #49 (CIW-08.1)
+added the concurrency tests, a run on the Windows dev machine takes about 15
+minutes, while the CI `Tests` job still takes under 2 minutes; until the local
+run is made faster, the green CI run of the one command on a PR's head counts
+as the full run (see `process.md` -> *Deadline mode*).
 
 **One layer alone.** Inside the container, name the layers after the service:
 

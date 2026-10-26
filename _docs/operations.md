@@ -236,7 +236,8 @@ How (PowerShell; `.env` holds `LLM_PROVIDER=anthropic`, `LLM_MODEL` and
    it; the import detail page shows two attempts, *Recovered* and the
    timeline.
 4. Capture the folder, then grep it for the vendor name, the product names,
-   the SKUs and `sk-ant-` (all empty), and `git log -p --all` for `sk-ant-`.
+   the SKUs and the Anthropic key prefix (all empty), and `git log -p --all`
+   for that prefix (empty).
 5. Back to the default: `Remove-Item Env:AGENT_ENABLED; docker compose up -d`.
 
 Never run `docker compose config`, `env`, `printenv` or `docker inspect` on

@@ -163,7 +163,7 @@ workflow file, in an image, or in a log. Full inventory in ADR-0002.
 | Secret | Where it lives | How it gets there |
 |---|---|---|
 | Fly deploy token (app-scoped), `FLY_API_TOKEN` | GitHub Actions secrets of the `development` and `production` environments, each only its own app's token | `flyctl tokens create deploy -a ciw-dev` / `-a ciw-prod`, piped into `gh secret set FLY_API_TOKEN --env <environment>` by Marcos (*Deployment* → *Provisioning*) |
-| `DATABASE_URL` per environment | Fly secrets of that app | `flyctl secrets import -a ciw-dev` from Marcos's machine, read from stdin (*Deployment* → *Provisioning*) |
+| `DATABASE_URL` per environment | Fly secrets of that app | `flyctl secrets import -a ciw-dev` / `-a ciw-prod` from Marcos's machine, read from stdin (*Deployment* → *Provisioning*) |
 | LLM provider key | local `.env` only | typed by Marcos; never set on Fly or GitHub by default |
 
 Controls: `.env*` gitignored, `.env.example` committed with placeholders;
@@ -174,8 +174,9 @@ by mistake: rotate it first, then remove it from history.
 
 ## Deployment *(issue 10, ADR-0002)*
 
-Fly.io apps `ciw-dev` and `ciw-prod` (prod: #15), each defining the `app`
-and `worker` process groups from the same public image
+Fly.io apps `ciw-dev` and `ciw-prod`, each defining the `app` and `worker`
+process groups but running machines only for `app` (zero `worker` machines
+in both, because the agent is off when deployed), from the same public image
 `ghcr.io/elugardo/catalog-import-watchtower:sha-<full commit SHA>`, one Neon
 PostgreSQL project per environment, `release_command = "alembic upgrade
 head"`, telemetry exporter and agent disabled when deployed. Workflows in
@@ -194,7 +195,8 @@ Requirements from spec §11:
   start and on Fly that second run is a no-op.
 - `workflow_dispatch` "Promote to production" with the image tag as input,
   gated by the GitHub `production` environment's required approval: runs
-  `flyctl deploy -a ciw-prod --image <tag>` (no rebuild), separate database.
+  `flyctl deploy -a ciw-prod --image <tag> --process-groups app` (no
+  rebuild, `app` group only), separate database.
 - Environments have their own URLs and health checks; both are in the README.
 - The only GitHub secret is the app-scoped Fly deploy token per environment.
 
@@ -251,12 +253,76 @@ ciw-dev`. To keep the app machine always on: set `min_machines_running = 1`.
 
 Public URL: <https://ciw-dev.fly.dev> (health: `/api/health`).
 
+### Production promotion (`.github/workflows/promote-prod.yml`)
+
+**Trigger.** Manual only (`workflow_dispatch`; no push, pull request or
+schedule trigger). One required input, the image tag that `deploy-dev.yml`
+published and deployed, `sha-<full 40-character lowercase commit SHA>`:
+
+    gh workflow run promote-prod.yml -f tag=sha-<SHA>
+
+The workflow file must be on `main` to be dispatched. The run is named
+*Promote sha-<SHA> to production*, so the run history lists every promoted
+tag. The image is never rebuilt for production: Fly pulls exactly the image
+dev ran.
+
+**1. `validate`** (no environment, no secret, no `flyctl`, `GITHUB_TOKEN`
+with `actions: read` only). It refuses the input, with an `::error::Refused:`
+message that names the reason, in this order:
+
+- (a) not exactly `sha-` + 40 lowercase hex characters: `dev`, `latest`, a
+  short SHA, uppercase hex, surrounding spaces or an empty input;
+- (b) the tag does not exist in `ghcr.io/elugardo/catalog-import-watchtower`
+  (`docker manifest inspect`, anonymous, so a private package also refuses);
+- (c) no successful `deploy-dev.yml` run for that commit ("dev never ran
+  it"; `GET .../actions/workflows/deploy-dev.yml/runs?head_sha=<SHA>&status=success`).
+
+A refused input fails here: no approval is requested and nothing is deployed.
+
+**2. Approval gate.** The `deploy` job runs in the GitHub `production`
+environment, whose required reviewer is Marcos. The run waits as *Waiting
+for review* until he approves it (*Review deployments* -> *Approve and
+deploy*) or rejects it.
+
+**3. `deploy`** (environment `production`, secret `FLY_API_TOKEN`, scoped to
+`ciw-prod`). It fails early when the token is missing, prints the image the
+`app` machine runs before the promotion (the rollback target), then runs
+
+    flyctl deploy --config fly.prod.toml -a ciw-prod --image ghcr.io/elugardo/catalog-import-watchtower:sha-<SHA> --process-groups app --ha=false
+
+The release command runs `alembic upgrade head` once before the new machine
+starts. Then the job removes any `worker` machine, lists the machines, and
+`scripts/smoke_check.py https://ciw-prod.fly.dev sha-<SHA>` passes only on
+HTTP 200 with `db: "ok"` and `version` equal to the promoted tag (30
+attempts, 10 s apart).
+
+**Concurrency.** Group `promote-prod` on the deploy job, without cancel:
+promotions run one at a time and a running one is never cancelled. GitHub
+keeps only the newest waiting run, so a third dispatch replaces a second one
+that has not started. Validation is outside the group, so a refusal never
+waits behind a deploy.
+
+**`fly.prod.toml` (prod).** The same settings as `fly.toml` with only
+`app = "ciw-prod"` changed (a unit test compares the two files): region
+`ewr`, no `[build]`, `release_command = "alembic upgrade head"`, rolling
+strategy, `/api/health` check, `auto_stop_machines = "stop"`,
+`auto_start_machines = true`, `min_machines_running = 0` (the machine stops
+when idle and the next request wakes it), `[env]` `AGENT_ENABLED = "false"`
+and `OTEL_SDK_DISABLED = "true"`, no secret. Prod runs one `app` machine and
+zero `worker` machines, the same as dev, and the alert UI shows *automated
+recovery disabled*. The prod database is its own Neon project; prod data is
+never shared with dev.
+
+Public URL: <https://ciw-prod.fly.dev> (health: `/api/health`).
+
 ### Provisioning (Marcos, once, from his machine)
 
 The workflows only reference what this creates; none of it is in the
-repository. Never reuse a token, app or database of another project; never
-print a value. `<...>` are placeholders. Tick each step in the PR with the
-command used, values redacted.
+repository. Never reuse a token, app or database of another project or
+environment; never print a value. `<...>` are placeholders. Tick each step in
+the PR (or evidence report) with the command used, values redacted.
+
+#### `ciw-dev`
 
 - [ ] **Fly app.** `flyctl apps create ciw-dev --org <personal-org-slug>`
 - [ ] **Neon project.** A *new* project for dev (console or
@@ -288,20 +354,76 @@ command used, values redacted.
   <https://ciw-dev.fly.dev/api/health> wakes it.
 - [ ] **Branch protection** on `main`: require the four PR check names above.
 
+#### `ciw-prod`
+
+Same shape as dev, with nothing shared: its own app, Neon project, secret,
+environment and token.
+
+- [ ] **Fly app.** `flyctl apps create ciw-prod --org <personal-org-slug>`
+- [ ] **Neon project.** A *new* project for prod, never the dev one (console
+  or `neonctl projects create --name ciw-prod --region-id aws-us-east-1`),
+  with a database `ciw`. Use the **direct** (not `-pooler`) connection
+  string.
+- [ ] **`DATABASE_URL` Fly secret** on `ciw-prod` only, in the form
+  `postgresql+psycopg://<role>:<password>@<endpoint-host>/ciw?sslmode=require`.
+  From Git Bash, without echoing it:
+  `read -rs DB_URL && printf 'DATABASE_URL=%s\n' "$DB_URL" | flyctl secrets import -a ciw-prod --stage; unset DB_URL`
+- [ ] **GitHub environment.** `gh api -X PUT repos/elugardo/catalog-import-watchtower/environments/production`,
+  then in the repository settings (*Environments* -> `production`): required
+  reviewer **Marcos**; deployment branches `main` only.
+- [ ] **Deploy token**, scoped to `ciw-prod` only, piped straight into the
+  `production` environment secret:
+  `flyctl tokens create deploy -a ciw-prod --name ciw-prod-github-actions --expiry <e.g. 2160h> | gh secret set FLY_API_TOKEN --env production --repo elugardo/catalog-import-watchtower`
+- [ ] **First promotion** of a tag dev ran:
+  `gh workflow run promote-prod.yml -f tag=sha-<SHA>`, then approve it.
+- [ ] **Checks.** `flyctl secrets list -a ciw-prod` shows only
+  `DATABASE_URL`; the `production` environment shows the required reviewer
+  and the single secret `FLY_API_TOKEN` (value hidden);
+  `flyctl machines list -a ciw-prod` shows one `app` machine and no
+  `worker`, and `stopped` after some idle minutes; a request to
+  <https://ciw-prod.fly.dev/api/health> wakes it.
+
 ## Rollback *(issue 10)*
 
-Procedure to document and rehearse once:
+A rollback is a promotion of the previous tag: the same workflow, the same
+validation, the same approval and the same smoke check. Rehearsed once on
+`ciw-prod` as N -> N-1 -> N (evidence:
+`_docs/evidence/<date>-deploy-prod/report.md`).
 
-1. Find the previous good tag in the deploy workflow history (or
-   `flyctl releases -a ciw-prod`).
-2. Run "Promote" with that tag, or from a machine with the deploy token:
-   `flyctl deploy -a ciw-prod --image ghcr.io/elugardo/catalog-import-watchtower:sha-<previous>`.
-3. Migrations: the MVP keeps schema changes backward-compatible (additive,
-   defaults), so the previous image runs against the newer schema and no
-   down-migration is needed. If a release ever needs a destructive change,
-   it ships in two releases (expand, then contract) and the rollback note
-   says which one is safe.
-4. Verify `/api/health` and one import on the rolled-back environment.
+1. **Find the previous tag.** `flyctl releases -a ciw-prod --image` lists the
+   releases with their images, or open the `promote-prod.yml` run history
+   (each run is named *Promote sha-<SHA> to production*, and its deploy log
+   prints the image it replaced). The tag N-1 must be one dev also ran.
+2. **Promote it.** `gh workflow run promote-prod.yml -f tag=sha-<previous SHA>`,
+   then approve the run in the `production` environment.
+3. **Check.** The smoke check passes with `version` = `sha-<previous SHA>`;
+   open <https://ciw-prod.fly.dev> and check that the imports are still
+   listed (the data lives in the database, which a rollback does not touch).
+4. **Promote forward again**: `gh workflow run promote-prod.yml -f
+   tag=sha-<SHA>` (N, or the fix once dev ran it), approve it; the smoke
+   check shows that `version`.
+
+**Migrations.** Migrations are additive only (new tables, new nullable
+columns or columns with defaults), so the previous image runs on the newer
+schema and nothing is downgraded; a rollback runs no down-migration. Fly's
+`release_command` (`alembic upgrade head`) on the older image is a no-op,
+because Alembic is already at head. A release that ever needs a destructive
+change (drop or rename a column or table, tighten a constraint) ships as
+**expand, then contract** over two releases: release A (expand) adds the new
+shape and stops using the old one; release B (contract) removes the old
+shape. Rolling back from A to the release before it is safe. Rolling back
+from B is safe only to A, never to a release before A, because B's schema
+no longer has what those older images read. The PR of a contract release
+says so here.
+
+**Emergency path** (GitHub Actions unavailable). From Marcos's machine, with
+his own `flyctl` login (not the CI token):
+
+    flyctl deploy --config fly.prod.toml -a ciw-prod --image ghcr.io/elugardo/catalog-import-watchtower:sha-<previous SHA> --process-groups app --ha=false
+    python scripts/smoke_check.py https://ciw-prod.fly.dev sha-<previous SHA>
+
+Then record the tag and the health response in an issue comment, because
+this path leaves no workflow run behind.
 
 ## The real-LLM demonstration *(issue 08, 11)*
 

@@ -16,10 +16,11 @@ kill_timeout = "10s"
 [deploy]
   # Authoritative migration step on Fly: runs once per deploy, in a temporary
   # machine, before any new app machine starts. A failing migration fails the
-  # deploy and the previous release keeps serving. Migrations are additive
-  # only, so on a rollback to an older image this is a no-op (Alembic is
-  # already at head) and the older image runs on the newer schema
-  # (operations.md -> Rollback).
+  # deploy and the previous release keeps serving. An image knows only the
+  # Alembic revisions it was built with, so a rollback works only to a release
+  # with the same Alembic head (then this is a no-op). Rolling back past a
+  # migration fails here with "Can't locate revision" and the current release
+  # keeps serving: fix forward (operations.md -> Rollback).
   release_command = "alembic upgrade head"
   strategy = "rolling"
 

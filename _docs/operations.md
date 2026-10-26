@@ -392,7 +392,7 @@ environment and token.
 A rollback is a promotion of the previous tag: the same workflow, the same
 validation, the same approval and the same smoke check. Rehearsed once on
 `ciw-prod` as N -> N-1 -> N (evidence:
-`_docs/evidence/<date>-deploy-prod/report.md`).
+`_docs/evidence/2026-10-26-deploy-prod/report.md`).
 
 1. **Find the previous tag.** `flyctl releases -a ciw-prod --image` lists the
    releases with their images, or open the `promote-prod.yml` run history
@@ -407,18 +407,12 @@ validation, the same approval and the same smoke check. Rehearsed once on
    tag=sha-<SHA>` (N, or the fix once dev ran it), approve it; the smoke
    check shows that `version`.
 
-**Migrations.** Migrations are additive only (new tables, new nullable
-columns or columns with defaults), so the previous image runs on the newer
-schema and nothing is downgraded; a rollback runs no down-migration. Fly's
-`release_command` (`alembic upgrade head`) on the older image is a no-op,
-because Alembic is already at head. A release that ever needs a destructive
-change (drop or rename a column or table, tighten a constraint) ships as
-**expand, then contract** over two releases: release A (expand) adds the new
-shape and stops using the old one; release B (contract) removes the old
-shape. Rolling back from A to the release before it is safe. Rolling back
-from B is safe only to A, never to a release before A, because B's schema
-no longer has what those older images read. The PR of a contract release
-says so here.
+**Migrations.** Migrations are additive only (new tables, new nullable columns or columns with defaults), so an older image runs on a newer schema and a rollback never runs a down-migration. But each image carries only the Alembic revisions that existed when it was built, and both Fly's `release_command` and the image CMD run `alembic upgrade head`. So a rollback is supported **only between releases with the same Alembic head**:
+
+- **Same head** (N added no migration): the older image's `alembic upgrade head` is a no-op and the rollback works as above.
+- **N added a migration**: the older image does not know N's revision, its `release_command` fails with `Can't locate revision identified by '<revision>'`, the deploy fails and N keeps serving. There is no rollback past a migration; fix forward instead (merge the fix, let dev deploy it, promote that tag). Check `alembic heads` on both tags before step 2.
+
+A destructive change (drop or rename a column or table, tighten a constraint) still ships as **expand, then contract** over two releases. Release A (expand) adds the new shape and stops using the old one. Release B (contract) removes the old shape. This keeps the machines that are still running working on the new schema during the rolling deploy. Each of the two releases adds a revision, so neither can be rolled back past. The PR of every release that adds a migration says so here.
 
 **Emergency path** (GitHub Actions unavailable). From Marcos's machine, with
 his own `flyctl` login (not the CI token):

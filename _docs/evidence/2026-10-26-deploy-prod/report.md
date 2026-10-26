@@ -8,8 +8,8 @@ Recorded on 2026-10-26, against `main` at `01347b7a22a03c3ed2c1e1df9ec71872d5275
 - **Final version on prod:** `sha-01347b7a22a03c3ed2c1e1df9ec71872d5275ff9` (N)
 - **Workflow:** `.github/workflows/promote-prod.yml` (`workflow_dispatch`, one `tag` input)
 
-Every production change in this report went through `promote-prod.yml`. No agent ran `flyctl deploy`,
-`flyctl secrets set` or `tokens create`. The `flyctl` calls below were read-only (`status`,
+Every production change in this report went through `promote-prod.yml`. Apart from the one-time provisioning the orchestrator did on Marcos's approval (see the checklist), no agent ran `flyctl deploy`,
+`flyctl secrets set` or `tokens create`, and neither the engineer nor QA handled a secret value. The `flyctl` calls below were read-only (`status`,
 `secrets list`, `machines list`, `releases`). No secret value appears in this report, and neither does the
 digest column of `flyctl secrets list`.
 
@@ -55,7 +55,7 @@ before provisioning (see `_docs/evidence/2026-10-26-deploy-dev/report.md`).
 - Each deploy log prints the image that was running before the deploy, which is the rollback target.
   Run 1 printed none (first deploy), run 2 printed N's image, and run 3 printed N-1's image.
 - After each run, the *Keep zero worker machines on ciw-prod* step listed only `app` machines.
-- `flyctl releases -a ciw-prod --image` shows v1 = N, v2 = N-1, v3 = N, all `complete`.
+- `flyctl releases -a ciw-prod --image` showed v1 = N, v2 = N-1, v3 = N, all `complete`, at rehearsal time; v4 = N again (same image) is the pending-gate re-promotion in section 6.
 - **Data survives the rollback.** The two imports below were made on N, before step 2. After step 2
   (on N-1) and after step 3 (on N again), `GET /api/imports` still returned `total` 2: import 1
   `COMPLETED` and import 2 `FAILED`. A rollback does not touch the database.
@@ -81,7 +81,7 @@ live tag, made later only to screenshot that waiting state, is screenshot 6 belo
 | `flyctl machines list -a ciw-prod` | one machine, group `app`, image `...:sha-01347b7a22a03c3ed2c1e1df9ec71872d5275ff9`; no `worker` machine |
 | `/api/health` | `{"status":"ok","db":"ok","agent_enabled":false,"version":"sha-01347b7a22a03c3ed2c1e1df9ec71872d5275ff9"}` |
 | History empty on first promotion | `GET /api/imports` right after step 1: `total` 0 |
-| `fixtures/valid.csv` import via the prod API | `POST /api/imports` (vendor `Prod Check Vendor`): import 1 `COMPLETED`, 1 attempt; `GET /api/products` `total` 3 |
+| `fixtures/valid.csv` import via the prod API | `POST /api/imports` (vendor `<demo vendor>`): import 1 `COMPLETED`, 1 attempt; `GET /api/products` `total` 3 |
 | Injected (synthetic) failure | the same file with `inject_transient_failure=true`: import 2 `FAILED`, `TRANSIENT_STORAGE_TIMEOUT`, alert 1 `OPEN`, reason `TRANSIENT_STORAGE_TIMEOUT on attempt 1 (synthetic demo fault)`; no attempt 2, because the agent is off on prod |
 | Prod SPA | <https://ciw-prod.fly.dev/> loads in Chrome. The dashboard shows Completed 1, Recovered 0, Failed 1, both imports, and under *Open incidents* the alert as `OPEN` with **automated recovery disabled** (read from the rendered page in Chrome). The served bundle `/assets/index-fbcjbP7B.js` contains the label |
 

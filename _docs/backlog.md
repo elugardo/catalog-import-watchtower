@@ -32,6 +32,16 @@ file is only the map from spec id to issue number and the dependency order.
 | 10.2 | Add manual production promotion and the rehearsed rollback | §11, ADR-0002 (prod, rollback) | 10.1 | P1 | [#15](https://github.com/elugardo/catalog-import-watchtower/issues/15) | `fp-15-prod-promotion` |
 | 11 | Prepare README, demo, and rubric evidence | §14 | all | P0 | [#16](https://github.com/elugardo/catalog-import-watchtower/issues/16) | `fp-16-readme-demo` |
 
+## Status (2026-10-26, at the PR of #16)
+
+State of every `final-project` issue, from `gh issue list --label final-project --state all`.
+Nothing was closed or edited to make this list look complete.
+
+- **Closed:** #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #14, #15, #24, #40; follow-ups #18, #22, #27, #28, #31, #36, #47, #50, #63.
+- **Merged, QA PASS and PM approved:** #13 (PR #66 merged as `fa6ce19`).
+- **Open, this issue:** #16 (README, demo, rubric evidence).
+- **Parked (deadline mode):** #44 (CIW-06.1).
+
 ## Order
 
 01 → 02 → 03.1 → 03.2a → 03.2b → 04.1 → 04.2 → 05 → 05.1 → 06, then 08.1 → 08.2, then

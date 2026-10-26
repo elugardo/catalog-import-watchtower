@@ -13,7 +13,7 @@ Commit: branch `fp-6-ui-detail-products`, implementation commits `eccb9fc`
 1. `docker compose down -v`, then `docker compose up --build -d --wait`
    (fresh volume).
 2. `valid.csv`, `update.csv`, `invalid.csv` uploaded in that order for vendor
-   `Sample Furnishings` (`POST /api/imports`, multipart): imports 1
+   `<demo vendor>` (`POST /api/imports`, multipart): imports 1
    `COMPLETED` (3 rows, 3 products), 2 `COMPLETED` (1 row, 1 product),
    3 `FAILED` / `VALIDATION_ERROR`.
 3. Chrome at `http://localhost:8000/` -> `dashboard.jpg`: Completed **2**,
@@ -28,16 +28,16 @@ Commit: branch `fp-6-ui-detail-products`, implementation commits `eccb9fc`
    `line 4, quantity: must be a whole number of up to 9 digits, got '-2'`,
    one `FAILED` attempt with an empty trace id.
 5. `docker compose restart app`, wait for healthy, then `/products` with the
-   Vendor select set to `Sample Furnishings` ->
-   `products-after-restart.jpg`: `showing 3 of 3 products`, CHAIR-001 at
-   `$129.99` / 20 (the `update.csv` values), LAMP-003 `$39.50` / 12,
-   TABLE-002 `$499.00` / 3, last updated in UTC. The import persisted across
+   Vendor select set to `<demo vendor>` ->
+   `products-after-restart.jpg`: `showing 3 of 3 products`, `<sku>` at
+   `$129.99` / 20 (the `update.csv` values), `<sku>` `$39.50` / 12,
+   `<sku>` `$499.00` / 3, last updated in UTC. The import persisted across
    the restart.
 
 ## Further checks on the same stack (not screenshots)
 
 - **500 rows, Load more.** A generated 500-row CSV (scratch file, not
-  committed) imported for vendor `Bulk Vendor` (import 4, `COMPLETED`, 500
+  committed) imported for vendor `<bulk demo vendor>` (import 4, `COMPLETED`, 500
   products, one `updated_at`). Products filtered to it, **Load more** clicked
   twice per page until it disappeared: 9 clicks, 10 requests
   (`vendor_id=4&limit=50`, then `offset=50` ... `offset=450`, from the app
@@ -45,7 +45,7 @@ Commit: branch `fp-6-ui-detail-products`, implementation commits `eccb9fc`
   no **Load more** at the end. "All vendors" the same way: 503 rows, 503
   distinct, 11 requests.
 - **Alerts before #7.** Three more `invalid.csv` imports (5, 6, 7, vendor
-  `Incident Check`), then SQL inserts into the Compose db (listed in the
+  `<incident demo vendor>`), then SQL inserts into the Compose db (listed in the
   hand-off comment on #6; not committed): alert `OPEN` on import 3,
   `IN_PROGRESS` on 5, `NEEDS_ATTENTION` on 6, `RESOLVED` on 7, and four
   agent actions on the alert of import 6. With the default

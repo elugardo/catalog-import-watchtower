@@ -111,7 +111,7 @@ jobs:
         run: docker load --input "$RUNNER_TEMP/ciw-image.tar"
       - name: Image reports the build-argument version and contains no .env
         run: |
-          docker compose run --rm --no-deps app ls -a /app | tee listing.txt
+          docker compose run --rm --no-deps app sh -c 'ls -a /app; exit 3' | tee listing.txt  # scratch: left side fails, tee succeeds
           if grep -q '^\.env' listing.txt; then echo "::error::.env leaked into the image"; exit 1; fi
           docker compose run --rm --no-deps app python -c "from app.settings import get_settings; v = get_settings().app_version; print(v); assert v == 'sha-${{ github.sha }}', v"
       - name: Hand the image to the scenario 6 job

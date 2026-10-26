@@ -93,4 +93,8 @@ bound parameters reaching the app log on an unhandled 500, a QA follow-up of
 #7) was kept as its own issue, CIW-05.1, and runs before #8. #44
 (`POST /api/imports` and `GET /api/imports/{id}` returning a 500
 `INTERNAL_ERROR` that `openapi.yaml` does not declare, a QA follow-up of #8)
-was kept as its own issue, CIW-06.1.
+was kept as its own issue, CIW-06.1. #50 (`AGENTS.md` -> *Layout* missing
+`agent_tools.py` / `alerts.py`, and nothing failing when the `api.md`
+redaction lists drift from the code, a QA follow-up of CIW-08.1) was folded
+into #11 and closed. #44 (CIW-06.1) is parked under deadline mode: it runs
+only if time remains before submission.

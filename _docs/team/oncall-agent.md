@@ -59,7 +59,7 @@ system, no HTTP, no SQL. The same functions back the maintenance CLI
 | `get_import_attempts(import_id)` | attempt number, status, error code, trace id, timings | read-only |
 | `get_import_diagnostics(import_id)` | observability query strings for this import and trace, plus the counts already in the incident | read-only, redacted |
 | `retry_failed_import(import_id)` | re-processes the *saved* CSV as attempt 2 | row lock on the import; only when status `FAILED`, failure code `TRANSIENT_STORAGE_TIMEOUT`, attempt count 1; a refused call returns the current state as a no-op |
-| `mark_needs_attention(alert_id, reason)` | alert → `NEEDS_ATTENTION` with a concise, content-free reason | alert must be `IN_PROGRESS` |
+| `mark_needs_attention(alert_id, reason)` | alert → `NEEDS_ATTENTION` with a concise, content-free reason | alert must be `IN_PROGRESS`; the reason is trimmed, cut to 200 characters (`alerts.MAX_REASON_LENGTH`) and trimmed again, so a stored reason never ends in whitespace and may be shorter than 200; an empty or all-whitespace reason is refused |
 | `resolve_alert(alert_id)` | alert `OPEN`, `IN_PROGRESS` or `NEEDS_ATTENTION` → `RESOLVED` | only when the import is `COMPLETED`; an alert already `RESOLVED` is refused |
 
 The guards live in the functions, not in the prompt. A prompt that behaves

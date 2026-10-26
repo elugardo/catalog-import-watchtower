@@ -1,7 +1,7 @@
 # Catalog Import Watchtower, local stack: `docker compose up --build`.
-# Every ${VAR} has a default, so a missing .env is not an error. Secrets (the
-# LLM key, CIW-08.2) come only from .env; nothing sensitive is written here
-# except the local Postgres URL below.
+# Every ${VAR} has a default, so a missing .env is not an error. The one secret
+# (ANTHROPIC_API_KEY) comes only from .env and reaches only `oncall-agent`;
+# nothing sensitive is written here except the local Postgres URL below.
 
 name: ciw
 
@@ -51,8 +51,12 @@ services:
     environment:
       <<: *shared-env
       OTEL_SERVICE_NAME: ciw-oncall-agent
+      # The LLM settings and the key reach this service only, never `app` or
+      # `test`. The key's value comes from the git-ignored .env (empty when
+      # unset, and the worker then stays idle, naming the reason).
       LLM_PROVIDER: ${LLM_PROVIDER:-}
       LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AGENT_POLL_SECONDS: ${AGENT_POLL_SECONDS:-10}
       AGENT_CLAIM_TIMEOUT_SECONDS: ${AGENT_CLAIM_TIMEOUT_SECONDS:-300}
       AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-8}

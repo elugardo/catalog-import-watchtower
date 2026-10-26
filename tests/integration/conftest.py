@@ -1,7 +1,10 @@
 """Integration fixtures: the real PostgreSQL, migrated by Alembic (never `create_all`).
 
-`migrated_engine` runs `alembic upgrade head` (non-destructive, a no-op when
-the schema is already current) against `DATABASE_URL`, so the suite works on
+The suite runs on its own database, `<configured database>_suite` on the
+server `DATABASE_URL` names (`database_url`), never on the configured database
+itself, so a live `oncall-agent` polling that database never sees the suite's
+alerts. `migrated_engine` runs `alembic upgrade head` (non-destructive, a no-op when
+the schema is already current) against it, so the suite works on
 the Compose `db` as well as in CI. Each test gets a `db` session inside one
 outer transaction that is rolled back afterwards, so the suite leaves no rows
 behind and can run twice in a row. Tests of the import API commit real
@@ -21,6 +24,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, make_url, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.settings import Settings
@@ -41,15 +45,52 @@ def run_alembic(database_url: str, *args: str) -> subprocess.CompletedProcess[st
     )
 
 
+SUITE_DATABASE_SUFFIX = "_suite"
+
+
 @pytest.fixture(scope="session")
-def database_url() -> str:
-    url = Settings().database_url
+def database_url() -> Iterator[str]:
+    """The suite's own database, `<configured database>_suite`, on the configured server.
+
+    Created if missing and kept between runs (so a warm run skips nothing but
+    the creation). The suite never writes to the configured database itself
+    (`ciw` in Compose), which is the one the app and a live `oncall-agent`
+    use: the worker cannot claim an alert the suite created, and the
+    developer's rows are not touched (`_docs/testing.md` -> *It leaves your
+    data alone*). For the whole session `DATABASE_URL` points at the suite
+    database, so code under test that builds its own settings lands there too.
+    """
+    configured = Settings().database_url
     try:
-        with create_engine(url, connect_args={"connect_timeout": 3}).connect() as connection:
+        with create_engine(configured, connect_args={"connect_timeout": 3}).connect() as connection:
             connection.execute(text("SELECT 1"))
     except Exception as exc:  # noqa: BLE001
         pytest.fail(f"PostgreSQL not reachable at the configured DATABASE_URL: {exc}")
-    return url
+    url = make_url(configured)
+    name = f"{url.database}{SUITE_DATABASE_SUFFIX}"
+    admin = create_engine(configured, isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as connection:
+            exists = connection.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :n"), {"n": name}
+            ).first()
+            if exists is None:
+                try:
+                    connection.execute(text(f'CREATE DATABASE "{name}"'))
+                except DBAPIError:  # a concurrent run created it first
+                    pass
+    finally:
+        admin.dispose()
+    suite_url = url.set(database=name).render_as_string(hide_password=False)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("DATABASE_URL", suite_url)
+        yield suite_url
+
+
+@pytest.fixture(scope="session", autouse=True)
+def suite_database(database_url) -> str:
+    """Every integration test runs with `DATABASE_URL` on the suite database."""
+    return database_url
 
 
 @pytest.fixture(scope="session")

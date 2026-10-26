@@ -23,6 +23,9 @@ app/static/
 .github/
 .claude/
 .agents/
-_docs/
+_docs/*
+# ...except the redaction contract, which tests/unit/test_agent_tool_results.py
+# checks against agent_tools (the drift check of CIW-08.2).
+!_docs/api.md
 data/
 *.log

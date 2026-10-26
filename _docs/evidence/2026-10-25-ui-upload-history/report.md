@@ -10,7 +10,7 @@ Commit: branch `fp-5-ui-upload-history`, implementation commit `4c09f3a`
 
 1. `docker compose down -v`, then `docker compose up --build -d --wait`
    (fresh volume, `GET /api/imports` -> `{"items":[],"total":0}`).
-2. Chrome at `http://localhost:8000/upload`: vendor `Sample Furnishings`,
+2. Chrome at `http://localhost:8000/upload`: vendor `<demo vendor>`,
    file `fixtures/valid.csv`, checkbox unchecked, **Import** ->
    `upload-valid.jpg` (COMPLETED, rows 3, products 3, link `/imports/1`).
 3. Same form, file `fixtures/invalid.csv` -> `upload-invalid.jpg` (FAILED,
@@ -25,9 +25,9 @@ Commit: branch `fp-5-ui-upload-history`, implementation commit `4c09f3a`
    `INVALID_CONTENT_TYPE: file must be a .csv`; a 257 KiB `.csv` ->
    `FILE_TOO_LARGE: CSV exceeds 256 KiB`; a Latin-1 `.csv` ->
    `INVALID_ENCODING: file is not valid UTF-8`. None created a record.
-   Then `  sample furnishings  ` with `valid.csv`, the checkbox ticked and
+   Then `  <demo vendor>  ` (the same name in lower case, with spaces around it) with `valid.csv`, the checkbox ticked and
    **Import** clicked twice in the same tick: one new import (`total` 2 -> 3),
-   shown vendor `Sample Furnishings`, `inject_transient_failure: true`,
+   shown vendor `<demo vendor>`, `inject_transient_failure: true`,
    status still `COMPLETED` (the fault is #7), and the earlier error cleared.
 5. Refresh `/upload`: empty form, checkbox unchecked, no result, `total`
    still 3.

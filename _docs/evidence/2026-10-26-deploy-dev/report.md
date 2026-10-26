@@ -143,7 +143,7 @@ base image sets; it is elided here only because gitleaks' `generic-api-key` rule
 ## Public dev environment (screenshots)
 
 Taken in Chrome against <https://ciw-dev.fly.dev>. The data is the committed synthetic fixture
-`fixtures/valid.csv` (3 rows) under the vendor name `Demo Vendor`. There is no real catalog content.
+`fixtures/valid.csv` (3 rows) under the vendor name `<demo vendor>`. There is no real catalog content.
 
 | File | Shows |
 |---|---|

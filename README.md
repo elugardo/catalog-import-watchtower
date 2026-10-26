@@ -502,7 +502,7 @@ recorded real-LLM run shows the rest.
 
 - **Do:** upload `fixtures/invalid.csv` for the same vendor, then open
   Products again.
-- **See:** `FAILED` / `VALIDATION_ERROR`, products 0, `1 error`:
+- **See:** `FAILED` / `VALIDATION_ERROR`, an empty products field, `1 error`:
   `line 4, quantity: must be a whole number of up to 9 digits, got '-2'`.
   The file's valid rows (a changed price, a new SKU) were not written
   either, so Products is unchanged.

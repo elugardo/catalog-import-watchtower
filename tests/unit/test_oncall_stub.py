@@ -62,6 +62,9 @@ def _idle_line(caplog) -> str:
         ("ANTHROPIC_API_KEY", "", "ANTHROPIC_API_KEY is not set"),
         ("ANTHROPIC_API_KEY", "   ", "ANTHROPIC_API_KEY is not set"),
         ("LLM_MODEL", "", "LLM_MODEL is not set"),
+        ("AGENT_MAX_TOOL_CALLS", f"8-{CANARY}", "AGENT_MAX_TOOL_CALLS is not a positive integer"),
+        ("AGENT_MAX_TOOL_CALLS", "0", "AGENT_MAX_TOOL_CALLS is not a positive integer"),
+        ("AGENT_TIMEOUT_SECONDS", "nan", "AGENT_TIMEOUT_SECONDS is not a positive number"),
     ],
     ids=lambda v: repr(v)[:30],
 )

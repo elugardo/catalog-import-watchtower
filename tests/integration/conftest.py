@@ -77,8 +77,12 @@ def database_url() -> Iterator[str]:
             if exists is None:
                 try:
                     connection.execute(text(f'CREATE DATABASE "{name}"'))
-                except DBAPIError:  # a concurrent run created it first
-                    pass
+                except DBAPIError:  # fine only when a concurrent run created it first
+                    created = connection.execute(
+                        text("SELECT 1 FROM pg_database WHERE datname = :n"), {"n": name}
+                    ).first()
+                    if created is None:
+                        raise
     finally:
         admin.dispose()
     suite_url = url.set(database=name).render_as_string(hide_password=False)

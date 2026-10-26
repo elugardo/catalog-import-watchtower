@@ -37,9 +37,13 @@ def _number(name: str, default: float, kind: type = float) -> Any:
     raw = os.environ.get(name, "").strip()
     if not raw:
         return kind(default)
-    value = kind(raw)
-    if value <= 0:
-        raise ValueError(f"{name} must be positive")
+    try:
+        value = kind(raw)
+    except ValueError:
+        value = 0
+    if not value > 0:  # also NaN
+        # Names the variable, never the value; the worker then idles with this reason.
+        raise ValueError(f"{name} is not a positive {'integer' if kind is int else 'number'}")
     return value
 
 

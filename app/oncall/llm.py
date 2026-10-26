@@ -44,13 +44,13 @@ from typing import Any
 from app.db import get_sessionmaker
 from app.models import AgentAction
 from app.oncall import prompt
-from app.services import agent_tools
+from app.services import agent_tools, alerts
 
 log = logging.getLogger("app.oncall.llm")
 
 PROVIDER = "anthropic"
 MAX_TOKENS = 4096
-MAX_DECISION_LENGTH = 200
+MAX_DECISION_LENGTH = alerts.MAX_REASON_LENGTH
 
 RESOLVED = "RESOLVED"
 NEEDS_ATTENTION = "NEEDS_ATTENTION"

@@ -33,7 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     from app.oncall import llm, poller
 
-    config = poller.WorkerConfig.from_env()
+    try:
+        config: poller.WorkerConfig | None = poller.WorkerConfig.from_env()
+        reason = poller.idle_reason(config)
+    except ValueError as exc:  # a tuning variable that is not a positive number
+        config, reason = None, str(exc)
     stop = threading.Event()
 
     def _handle_signal(signum: int, _frame: object) -> None:
@@ -43,8 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    reason = poller.idle_reason(config)
-    if reason is not None:
+    if config is None or reason is not None:
         log.info("oncall-agent: idle because %s", reason)
         while not stop.wait(timeout=1.0):
             pass

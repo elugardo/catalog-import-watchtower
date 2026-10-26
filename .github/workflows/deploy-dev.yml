@@ -1,0 +1,144 @@
+# Publish and deploy to development (CIW-10.1, spec section 11, ADR-0002).
+#
+# On every push to `main` (and on manual dispatch, so a branch can be
+# deployed once for QA before merge):
+#   1. publish: build the one runtime image ONCE with
+#      APP_VERSION=sha-<full commit SHA> and push it to public GHCR as
+#      `sha-<full SHA>` and the moving `dev` tag, on the same digest;
+#   2. deploy:  `flyctl deploy -a ciw-dev --image ...:sha-<SHA>` (no rebuild,
+#      no Fly builder; Fly's release_command runs the migrations), then
+#      smoke-check https://ciw-dev.fly.dev/api/health for 200, db ok and
+#      version sha-<SHA>.
+#
+# Secrets: only FLY_API_TOKEN, a deploy token scoped to the ciw-dev app,
+# stored in the GitHub `development` environment. GITHUB_TOKEN (packages:
+# write) pushes the image. Nothing is ever echoed. This workflow never runs
+# on pull requests, so fork PRs can neither trigger it nor read its secret.
+# The only Fly app named here is ciw-dev; production is promote-prod.yml (#15).
+
+name: Deploy to development
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# One deploy at a time, never cancelled midway: two quick pushes run in
+# order, and if a third arrives while one waits, only the newest waits, so
+# the newest commit always ends as both the `dev` tag and the running release.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash # bash -eo pipefail
+
+env:
+  IMAGE: ghcr.io/elugardo/catalog-import-watchtower
+  FLY_APP: ciw-dev
+  DEV_URL: https://ciw-dev.fly.dev
+
+jobs:
+  publish:
+    name: Build once and push to GHCR
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image tag for this commit
+        id: meta
+        run: echo "tag=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR with the workflow token
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push sha-<SHA> and dev (one build, one digest)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: APP_VERSION=${{ steps.meta.outputs.tag }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE }}:dev
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: false # one plain manifest, so both tags show the same digest
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+      - name: Both tags point at the same digest
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          BUILT: ${{ steps.build.outputs.digest }}
+        run: |
+          sha_digest=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)
+          dev_digest=$(docker buildx imagetools inspect "$IMAGE:dev" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "built           $BUILT"
+          echo "$IMAGE:$TAG  $sha_digest"
+          echo "$IMAGE:dev     $dev_digest"
+          test "$sha_digest" = "$BUILT"
+          test "$dev_digest" = "$BUILT"
+
+  deploy:
+    name: Deploy to ciw-dev and smoke-check
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: development
+      url: ${{ env.DEV_URL }}
+    env:
+      TAG: ${{ needs.publish.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4 # for fly.toml
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
+        with:
+          version: 0.4.122
+      - name: Fail early if the deploy token is not configured
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::FLY_API_TOKEN is not set in the 'development' environment (_docs/operations.md -> Deployment -> Provisioning)"
+            exit 1
+          fi
+      # `--image`: Fly pulls the public image; nothing is built here or on
+      # Fly. `--process-groups app`: only the HTTP group gets machines; the
+      # worker group stays at zero on dev (fly.toml). `--ha=false`: one app
+      # machine, stopped when idle.
+      - name: flyctl deploy -a ciw-dev --image <image>:sha-<SHA>
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --config fly.toml -a "$FLY_APP" \
+            --image "$IMAGE:$TAG" \
+            --process-groups app \
+            --ha=false \
+            --wait-timeout 5m0s
+      - name: Keep zero worker machines on ciw-dev
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl machines list -a "$FLY_APP" --json > machines.json
+          workers=$(jq '[.[] | select(.config.metadata.fly_process_group == "worker")] | length' machines.json)
+          if [ "$workers" -gt 0 ]; then
+            echo "removing $workers worker machine(s): ciw-dev runs none (AGENT_ENABLED=false)"
+            flyctl scale count worker=0 -a "$FLY_APP" --yes
+            flyctl machines list -a "$FLY_APP" --json > machines.json
+          fi
+          echo "process group / state / image"
+          jq -r '.[] | "\(.config.metadata.fly_process_group // "?")\t\(.state)\t\(.config.image // "")"' machines.json
+          test "$(jq '[.[] | select(.config.metadata.fly_process_group == "worker")] | length' machines.json)" = 0
+      - name: Smoke check /api/health (200, db ok, version sha-<SHA>)
+        run: python3 scripts/smoke_check.py "$DEV_URL" "$TAG" --attempts 30 --interval 10

@@ -1,12 +1,18 @@
 # PR checks. `tests` runs the one test command (CIW-06, `_docs/testing.md` ->
 # The one command): backend unit, backend integration against the Compose
 # `db` (including the OpenAPI 3.1 validation and the Alembic round trip of
-# CIW-02), `check:api` and Vitest, all inside the `test` container. `compose-up`
-# is spec section 9 scenario 6 (the stack starts with one command and reports
-# the database reachable). `image` builds the runtime image; its Dockerfile
-# `web` stage runs `npm run build` (tsc --noEmit + vite build), so the
-# frontend production build runs here. CIW-10.1 adds gitleaks, the GHCR
-# publish and the dev deploy. Nothing here needs a secret.
+# CIW-02), `check:api` and Vitest, all inside the `test` container. `image`
+# builds the runtime image once per run; its Dockerfile `web` stage runs
+# `npm run build` (tsc --noEmit + vite build), so the frontend production
+# build runs here. `compose-up` is spec section 9 scenario 6: it starts that
+# same image with the real compose.yaml. `gitleaks` scans the whole history
+# for committed secrets (CIW-10.1).
+#
+# Secrets: none. No job here reads a secret, and GitHub gives pull requests
+# from forks no secrets at all, so a fork PR runs exactly these checks.
+# Image builds go through the GitHub Actions layer cache (scopes `runtime`
+# and `test`); the build contexts exclude `.env` (.dockerignore and
+# Dockerfile.test.dockerignore), so no cache entry can hold one.
 
 name: CI
 
@@ -21,13 +27,52 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # An explicit `shell: bash` runs `bash -eo pipefail {0}`, so a pipe fails
+    # when any command in it fails, not only the last one (QA of #2).
+    shell: bash
+
 jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.21.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # every commit, not only the PR head
+      - name: Install gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" version
+      - name: gitleaks git (full history, findings redacted)
+        run: '"$RUNNER_TEMP/gitleaks" git . --redact --verbose --exit-code 1'
+
   tests:
     name: Tests (the one test command)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+        id: buildx
+      # Warms the builder from the GitHub Actions cache. The one command below
+      # then runs unchanged, `--build` included, on the same builder, so its
+      # build is all cache hits and still builds from this checkout.
+      - name: Warm the test image layers (layer cache, scope test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.test
+          tags: ciw-test:local
+          load: true
+          cache-from: type=gha,scope=test
+          cache-to: type=gha,scope=test,mode=max
       - name: docker compose -f compose.yaml -f compose.test.yaml run --rm --build test
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
         run: docker compose -f compose.yaml -f compose.test.yaml run --rm --build test
       - name: Database logs (on failure)
         if: failure()
@@ -36,39 +81,66 @@ jobs:
         if: always()
         run: docker compose -f compose.yaml -f compose.test.yaml down -v
 
-  compose-up:
-    name: Scenario 6 (docker compose up --wait, then /api/health)
+  image:
+    name: Image build (runtime image, built once per run)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: docker compose up --build -d --wait
-        run: docker compose up --build -d --wait --wait-timeout 600
-      - name: GET /api/health is 200 with db ok
+      # Created before the build: the image must not pick it up.
+      - name: Plant a placeholder .env in the build context
+        run: echo "placeholder=1" > .env
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the app image with the commit SHA as version (layer cache, scope runtime)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ciw:local
+          build-args: APP_VERSION=sha-${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/ciw-image.tar
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+      - name: Load the image
+        run: docker load --input "$RUNNER_TEMP/ciw-image.tar"
+      - name: Image reports the build-argument version and contains no .env
+        run: |
+          docker compose run --rm --no-deps app ls -a /app | tee listing.txt
+          if grep -q '^\.env' listing.txt; then echo "::error::.env leaked into the image"; exit 1; fi
+          docker compose run --rm --no-deps app python -c "from app.settings import get_settings; v = get_settings().app_version; print(v); assert v == 'sha-${{ github.sha }}', v"
+      - name: Hand the image to the scenario 6 job
+        uses: actions/upload-artifact@v4
+        with:
+          name: ciw-image
+          path: ${{ runner.temp }}/ciw-image.tar
+          retention-days: 1
+          compression-level: 0 # layers are already compressed
+
+  compose-up:
+    name: Scenario 6 (docker compose up --wait, then /api/health)
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the image built from this commit
+        uses: actions/download-artifact@v4
+        with:
+          name: ciw-image
+          path: ${{ runner.temp }}
+      - name: Load the image
+        run: docker load --input "$RUNNER_TEMP/ciw-image.tar"
+      # `--no-build`: start the image the `image` job built from this commit
+      # (tag ciw:local, the one compose.yaml names) instead of building again.
+      - name: docker compose up --no-build -d --wait
+        run: docker compose up --no-build -d --wait --wait-timeout 600
+      - name: GET /api/health is 200 with db ok and this commit's version
         run: |
           status=$(curl -sS -o health.json -w '%{http_code}' http://localhost:8000/api/health)
           echo "HTTP $status"; cat health.json; echo
           test "$status" = 200
           jq -e '.db == "ok"' health.json
+          jq -e --arg v "sha-${{ github.sha }}" '.version == $v' health.json
       - name: Stack logs (on failure)
         if: failure()
         run: docker compose logs
       - name: Stop the stack and drop its volume
         if: always()
         run: docker compose down -v
-
-  image:
-    name: Image build (docker compose build)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Build the app image with the commit SHA as version
-        run: docker compose build app
-        env:
-          APP_VERSION: sha-${{ github.sha }}
-      - name: Image reports the build-argument version and contains no .env
-        run: |
-          echo "placeholder=1" > .env
-          docker compose run --rm --no-deps app ls -a /app | tee listing.txt
-          if grep -q '^\.env' listing.txt; then echo "::error::.env leaked into the image"; exit 1; fi
-          docker compose run --rm --no-deps app python -c "from app.settings import get_settings; v = get_settings().app_version; print(v); assert v == 'sha-${{ github.sha }}', v"

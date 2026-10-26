@@ -18,6 +18,9 @@ This README is rewritten by #16 (CIW-11) into the reviewer walkthrough
 (problem, architecture, quick start, tests, deployment, observability, AI
 workflow, limitations).
 
+- Development deployment: <https://ciw-dev.fly.dev> (health:
+  [`/api/health`](https://ciw-dev.fly.dev/api/health)); deployed by
+  `.github/workflows/deploy-dev.yml` on every push to `main`
 - Specification: [`_docs/spec.md`](_docs/spec.md)
 - How work is organized: [`AGENTS.md`](AGENTS.md) and
   [`_docs/process.md`](_docs/process.md)

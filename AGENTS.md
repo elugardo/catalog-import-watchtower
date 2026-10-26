@@ -41,12 +41,14 @@ lands; whoever creates one updates this section in the same PR.
 ```
 <repo root>/
 ├── AGENTS.md, CLAUDE.md, README.md
-├── .github/workflows/     ci.yml (PR checks); deploy-dev.yml, promote-prod.yml (issue 10)
+├── .github/workflows/     ci.yml (PR checks: gitleaks, the one test command, runtime image built once, scenario 6); deploy-dev.yml (push to main: GHCR sha-<SHA> + dev, flyctl deploy to ciw-dev, smoke check); promote-prod.yml (issue 15)
+├── fly.toml               Fly config of ciw-dev (region ewr, release_command migrates, stops when idle, zero worker machines); no secret, no build
 ├── openapi.yaml           API contract (OpenAPI 3.1), written before the code; validated in CI
 ├── compose.yaml           app, oncall-agent, db, otel-lgtm; one command; every ${VAR} has a default
 ├── compose.test.yaml      test overlay: only the `test` service of the one test command; never part of `up`
 ├── Dockerfile.test, Dockerfile.test.dockerignore   the test image (never deployed); its own ignore file keeps tests/ out of the runtime context
 ├── scripts/run_tests.py   entry point of the `test` container: every layer in order, one summary line each
+├── scripts/smoke_check.py deployed /api/health check with bounded retries (deploy-dev.yml); stdlib only
 ├── .gitattributes         fixtures/*.csv unconverted; scripts/** LF
 ├── Dockerfile, .dockerignore   multi-stage: node builds web/, then the Python image serving SPA + API; APP_VERSION build arg
 ├── .env.example           every variable, no secrets
@@ -82,6 +84,8 @@ uv run openapi-spec-validator openapi.yaml            # validate the OpenAPI 3.1
 uv run alembic upgrade head                           # apply migrations to DATABASE_URL (the app entrypoint does this too)
 uv run alembic check                                  # fails if the models and the migrations differ
 uv run alembic revision --autogenerate -m "<what>"    # draft a new, additive-only revision; review it before committing
+gh workflow run deploy-dev.yml --ref main             # publish sha-<SHA> + dev to GHCR and deploy it to ciw-dev (also runs on every push to main)
+python scripts/smoke_check.py https://ciw-dev.fly.dev sha-<SHA>   # the deploy's health smoke check, by hand
 npm --prefix web run dev                              # Vite dev server :5173, proxies /api to the API on :8000
 npm --prefix web run gen:api                          # regenerate web/src/api/schema.d.ts from openapi.yaml (commit the result)
 npm --prefix web run check:api                        # one layer on the host (needs Node): fails when schema.d.ts differs from openapi.yaml

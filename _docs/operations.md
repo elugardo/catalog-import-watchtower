@@ -162,8 +162,8 @@ workflow file, in an image, or in a log. Full inventory in ADR-0002.
 
 | Secret | Where it lives | How it gets there |
 |---|---|---|
-| Fly deploy token (app-scoped) | GitHub Actions secrets of the `development` and `production` environments | `flyctl tokens create deploy -a ciw-dev` / `-a ciw-prod`, pasted into the repo's environment settings by Marcos |
-| `DATABASE_URL` per environment | Fly secrets of that app | `flyctl secrets set -a ciw-dev DATABASE_URL=…` from Marcos's machine |
+| Fly deploy token (app-scoped), `FLY_API_TOKEN` | GitHub Actions secrets of the `development` and `production` environments, each only its own app's token | `flyctl tokens create deploy -a ciw-dev` / `-a ciw-prod`, piped into `gh secret set FLY_API_TOKEN --env <environment>` by Marcos (*Deployment* → *Provisioning*) |
+| `DATABASE_URL` per environment | Fly secrets of that app | `flyctl secrets import -a ciw-dev` from Marcos's machine, read from stdin (*Deployment* → *Provisioning*) |
 | LLM provider key | local `.env` only | typed by Marcos; never set on Fly or GitHub by default |
 
 Controls: `.env*` gitignored, `.env.example` committed with placeholders;
@@ -174,9 +174,9 @@ by mistake: rotate it first, then remove it from history.
 
 ## Deployment *(issue 10, ADR-0002)*
 
-Fly.io apps `ciw-dev` and `ciw-prod`, each running the `app` and `worker`
-process groups from the same public image
-`ghcr.io/elugardo/catalog-import-watchtower:sha-<commit>`, one Neon
+Fly.io apps `ciw-dev` and `ciw-prod` (prod: #15), each defining the `app`
+and `worker` process groups from the same public image
+`ghcr.io/elugardo/catalog-import-watchtower:sha-<full commit SHA>`, one Neon
 PostgreSQL project per environment, `release_command = "alembic upgrade
 head"`, telemetry exporter and agent disabled when deployed. Workflows in
 this repository: `.github/workflows/ci.yml`, `deploy-dev.yml`,
@@ -188,13 +188,105 @@ Requirements from spec §11:
 - PR → CI: backend unit + integration tests, frontend tests + build, the
   image build, `openapi.yaml` vs. generated schema check.
 - Push to `main` → build the one image tagged `sha-<commit>` (and moving
-  `dev`), push to GHCR, deploy to **development** (migrations run from the
-  entrypoint), smoke-check `/api/health` for `db: ok`.
+  `dev`), push to GHCR, deploy to **development**, smoke-check
+  `/api/health` for `db: ok`. Migrations run from Fly's `release_command`
+  on deploy; the entrypoint also runs them, so the Compose stack migrates on
+  start and on Fly that second run is a no-op.
 - `workflow_dispatch` "Promote to production" with the image tag as input,
   gated by the GitHub `production` environment's required approval: runs
   `flyctl deploy -a ciw-prod --image <tag>` (no rebuild), separate database.
 - Environments have their own URLs and health checks; both are in the README.
 - The only GitHub secret is the app-scoped Fly deploy token per environment.
+
+### PR CI (`.github/workflows/ci.yml`)
+
+Four jobs, none of which reads a secret (fork PRs get none from GitHub):
+
+| Job (status check name to require on `main`) | What it does |
+|---|---|
+| `Secret scan (gitleaks)` | gitleaks 8.21.2 over the whole history (`fetch-depth: 0`), findings redacted. No `.gitleaks.toml`: the default rules pass on `main` with no allowlist. |
+| `Tests (the one test command)` | warms the test image from the GitHub Actions layer cache (scope `test`), then runs the one test command unchanged on the same builder |
+| `Image build (runtime image, built once per run)` | builds the runtime image once (cache scope `runtime`) with `APP_VERSION=sha-<commit>`, asserts the version and that a planted `.env` is not in `/app`, and hands the image to the next job as an artifact |
+| `Scenario 6 (docker compose up --wait, then /api/health)` | loads that image and runs `docker compose up --no-build -d --wait` with the real `compose.yaml`; `/api/health` must be 200, `db: ok`, `version` = `sha-<commit>` |
+
+Every `run:` step uses `shell: bash` (`bash -eo pipefail`), so a pipe fails
+when any command in it fails. Branch protection on `main` (Marcos, in the
+repository settings): require the four check names above.
+
+### Development deploy (`.github/workflows/deploy-dev.yml`)
+
+On push to `main`, and on `workflow_dispatch`. `GITHUB_TOKEN` permissions
+`contents: read`, `packages: write`; concurrency group `deploy-dev` without
+cancel, so deploys run one at a time in order and the newest commit ends as
+both the `dev` tag and the running release.
+
+1. **publish**: one `docker/build-push-action` build with
+   `APP_VERSION=sha-<SHA>`, pushed as `:sha-<SHA>` and `:dev`; the step after
+   it compares both tags' digests with `docker buildx imagetools inspect`.
+2. **deploy** (GitHub environment `development`, secret `FLY_API_TOKEN`):
+   `flyctl deploy --config fly.toml -a ciw-dev --image ghcr.io/elugardo/catalog-import-watchtower:sha-<SHA> --process-groups app --ha=false`.
+   Fly pulls the public image; nothing is built on Fly. The release command
+   runs `alembic upgrade head` once before any new machine starts; a failing
+   migration fails the deploy and the previous release keeps serving.
+3. The job then removes any `worker` machine and lists the machines, and
+   `scripts/smoke_check.py https://ciw-dev.fly.dev sha-<SHA>` requests
+   `/api/health` up to 30 times, 10 s apart (a stopped machine needs a few
+   seconds to wake; about 5 to 10 minutes at most), and fails unless one
+   answer is 200 with `db: "ok"` and `version: "sha-<SHA>"`.
+
+**`fly.toml` (dev).** `app = "ciw-dev"`, region `ewr`, no `[build]`. The
+`app` group serves HTTP on 8000 with a check on `/api/health`,
+`auto_stop_machines = "stop"`, `auto_start_machines = true`,
+`min_machines_running = 0`: the machine stops when idle and the next request
+wakes it (the first request after a stop takes a few seconds). `[env]` holds
+`AGENT_ENABLED = "false"` and `OTEL_SDK_DISABLED = "true"`, no secret.
+
+**Zero worker machines on dev.** The `worker` group is defined but runs no
+machine: with `AGENT_ENABLED=false` it would only idle, and the UI label
+*automated recovery disabled* comes from `/api/health`. The deploy passes
+`--process-groups app` and the next step scales `worker` to 0 if a machine
+exists. To run a worker on dev anyway: remove the *Keep zero worker
+machines* step from `deploy-dev.yml`, then `flyctl scale count worker=1 -a
+ciw-dev`. To keep the app machine always on: set `min_machines_running = 1`.
+
+Public URL: <https://ciw-dev.fly.dev> (health: `/api/health`).
+
+### Provisioning (Marcos, once, from his machine)
+
+The workflows only reference what this creates; none of it is in the
+repository. Never reuse a token, app or database of another project; never
+print a value. `<...>` are placeholders. Tick each step in the PR with the
+command used, values redacted.
+
+- [ ] **Fly app.** `flyctl apps create ciw-dev --org <personal-org-slug>`
+- [ ] **Neon project.** A *new* project for dev (console or
+  `neonctl projects create --name ciw-dev --region-id aws-us-east-1`), with a
+  database `ciw`. Use the **direct** (not `-pooler`) connection string.
+- [ ] **`DATABASE_URL` Fly secret**, in the SQLAlchemy psycopg form
+  `postgresql+psycopg://<role>:<password>@<endpoint-host>/ciw?sslmode=require`
+  (a bare `postgresql://` URL does not work: psycopg2 is not installed).
+  From Git Bash, without echoing it:
+  `read -rs DB_URL && printf 'DATABASE_URL=%s\n' "$DB_URL" | flyctl secrets import -a ciw-dev --stage; unset DB_URL`
+- [ ] **GitHub environment.** `gh api -X PUT repos/elugardo/catalog-import-watchtower/environments/development`
+  (deployment branches: all, or `main` plus the PR branch for the one
+  pre-merge run).
+- [ ] **Deploy token**, scoped to `ciw-dev` only, piped straight into the
+  environment secret:
+  `flyctl tokens create deploy -a ciw-dev --name ciw-dev-github-actions --expiry <e.g. 2160h> | gh secret set FLY_API_TOKEN --env development --repo elugardo/catalog-import-watchtower`
+- [ ] **First publish**: run `deploy-dev.yml` (push to `main`, or
+  `gh workflow run deploy-dev.yml --ref <branch>` once the file is on
+  `main`; GitHub dispatches only workflows that exist on the default
+  branch). The deploy job fails until the package is public if it was
+  created private.
+- [ ] **GHCR package public.** github.com → *Packages* →
+  `catalog-import-watchtower` → *Package settings* → *Change visibility* →
+  Public. Check: `docker logout ghcr.io; docker pull ghcr.io/elugardo/catalog-import-watchtower:sha-<SHA>`.
+  Re-run the failed deploy job if step 6 failed on the pull.
+- [ ] **Checks.** `flyctl secrets list -a ciw-dev` shows only `DATABASE_URL`;
+  `flyctl machines list -a ciw-dev` shows one `app` machine and no `worker`;
+  after some idle minutes it shows `stopped`, and a request to
+  <https://ciw-dev.fly.dev/api/health> wakes it.
+- [ ] **Branch protection** on `main`: require the four PR check names above.
 
 ## Rollback *(issue 10)*
 

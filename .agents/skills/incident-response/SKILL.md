@@ -30,8 +30,10 @@ and the time in your notes.
 ## 2. Read the incident
 
 `get_import_incident(alert_id)` (worker) or
-`docker compose exec app python -m app.oncall tools get_import_incident <alert_id>`
+`docker compose exec -T oncall-agent python -m app.oncall tools get_import_incident <alert_id>`
 (human; every CLI call has the same guards and writes the same audit rows).
+Run it in `oncall-agent`, never `app`: a retry run inside `app` dies when
+`app` restarts and still spends the retry budget.
 Note:
 
 - import id, import status, failure code
@@ -109,6 +111,6 @@ include CSV rows, vendor or product names, or tokens in the report.
 
 ## Observability queries
 
-Filled in by issue 09 and kept current in `_docs/operations.md`: the Loki
-query for one import's logs, the Tempo search for a failed attempt, and the
-Prometheus queries for the four metrics.
+Use the query cheat-sheet and the reviewer path in `_docs/operations.md`
+-> *Telemetry* (kept current there, not repeated here). `get_import_diagnostics`
+returns the two strings to paste into Grafana Explore for one import.

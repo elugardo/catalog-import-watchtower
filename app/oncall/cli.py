@@ -83,21 +83,27 @@ def run(argv: list[str], stdout: TextIO | None = None, stderr: TextIO | None = N
         return _usage(stderr, parsed)
     tool, args = parsed
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        stream=stderr,
-    )
+    configured = False
     try:
         # Imported here, after the usage check: a usage error touches nothing.
         # Inside the try, so an import-time failure exits 4 with the type only,
         # never 1 (REFUSED) with a traceback.
+        from app import telemetry
+
+        # JSON log lines on stderr; stdout stays the one result object. The
+        # telemetry is that of the container the command runs in, and a retry
+        # here is the root of its own trace (no tool span: no agent run).
+        telemetry.setup_logging(stderr)
+        configured = telemetry.configure("ciw-oncall-agent")
         from app.services import agent_tools
 
         result = agent_tools.TOOLS[tool](*args)
     except Exception as exc:  # noqa: BLE001 - one line, the type only
         print(f"error: {type(exc).__name__}", file=stderr)
         return EXIT_ERROR
+    finally:
+        if configured:
+            telemetry.shutdown()  # flush before the process exits
     print(json.dumps(result), file=stdout)
     return {
         agent_tools.DONE: EXIT_DONE,

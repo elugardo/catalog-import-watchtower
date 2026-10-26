@@ -20,6 +20,7 @@ import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -104,6 +105,42 @@ def database_url() -> Iterator[str]:
 def suite_database(database_url) -> str:
     """Every integration test runs with `DATABASE_URL` on the suite database."""
     return database_url
+
+
+@pytest.fixture(scope="session", autouse=True)
+def telemetry_off() -> Iterator[None]:
+    """Telemetry off for the whole suite, whatever a developer's `.env` says (#12).
+
+    A test that needs it installs in-memory exporters (`otel`) or sets the
+    variable itself.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("OTEL_SDK_DISABLED", "true")
+        yield
+
+
+@pytest.fixture
+def otel() -> Iterator[Any]:
+    """In-memory span, log and metric exporters for one test; telemetry off again afterwards.
+
+    Request it before any fixture that builds the app (`otel_client`), so the
+    app is instrumented.
+    """
+    from app import telemetry
+    from tests.integration.otel import Captured
+
+    captured = Captured()
+    telemetry.install(captured.span_exporter, captured.log_exporter, captured.metric_reader)
+    try:
+        yield captured
+    finally:
+        telemetry.reset()
+
+
+@pytest.fixture
+def otel_client(otel, make_client, database_url, migrated_engine) -> TestClient:
+    """`client`, built after `otel`: the app has its server spans and HTTP metrics."""
+    return make_client(DATABASE_URL=database_url)
 
 
 @pytest.fixture(scope="session")

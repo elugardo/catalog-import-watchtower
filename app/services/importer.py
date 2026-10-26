@@ -29,6 +29,7 @@ SQL parameters.
 
 import hashlib
 import logging
+import time
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -36,6 +37,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app import telemetry
 from app.db import get_sessionmaker
 from app.models import AgentAction, Alert, Import, ImportAttempt, Product
 from app.schemas import ImportDetailOut
@@ -83,8 +85,16 @@ def create_import(request: UploadRequest) -> int:
             session.add(record)
             session.flush()
             import_id = record.id
-    log.info("import %d created", import_id)
+    log.info("import %d created", import_id, extra=telemetry.log_ids(import_id=import_id))
     return import_id
+
+
+def attempt_span(import_id: int, attempt_number: int) -> Any:
+    """The `catalog.import.attempt` span, not yet current: a child of the current span."""
+    return telemetry.start_span(
+        telemetry.SPAN_ATTEMPT,
+        telemetry.ids(import_id=import_id, attempt_number=attempt_number),
+    )
 
 
 def run_attempt(import_id: int, attempt_number: int) -> None:
@@ -93,10 +103,14 @@ def run_attempt(import_id: int, attempt_number: int) -> None:
     `attempt_number` is 1 from the upload. The agent's retry does not call this:
     `agent_tools.retry_failed_import` runs `begin_attempt` inside its locked
     transaction and then `process_attempt`, the same processing.
+
+    Both run under the attempt's span, so `begin_attempt` stores its trace id;
+    from the upload, the span is a child of the `POST /api/imports` server span.
     """
-    with _session() as session, session.begin():
-        attempt_id = begin_attempt(session, import_id, attempt_number)
-    process_attempt(import_id, attempt_id, attempt_number)
+    with telemetry.use_span(attempt_span(import_id, attempt_number)):
+        with _session() as session, session.begin():
+            attempt_id = begin_attempt(session, import_id, attempt_number)
+        process_attempt(import_id, attempt_id, attempt_number)
 
 
 def begin_attempt(session: Session, import_id: int, attempt_number: int) -> int:
@@ -110,10 +124,18 @@ def begin_attempt(session: Session, import_id: int, attempt_number: int) -> int:
     No guard here: the retry's guard and row lock are the caller's
     (`agent_tools.retry_failed_import`), which holds `SELECT … FOR UPDATE` on
     the import when it calls this.
+
+    The caller makes the attempt's span current first: its trace id is stored
+    in `trace_id` (NULL with telemetry off).
     """
     if attempt_number > 1:
         session.execute(update(Import).where(Import.id == import_id).values(status="PROCESSING"))
-    attempt = ImportAttempt(import_id=import_id, attempt_number=attempt_number, status="RUNNING")
+    attempt = ImportAttempt(
+        import_id=import_id,
+        attempt_number=attempt_number,
+        status="RUNNING",
+        trace_id=telemetry.current_trace_id(),
+    )
     session.add(attempt)
     session.flush()
     return attempt.id
@@ -131,7 +153,28 @@ def process_attempt(import_id: int, attempt_id: int, attempt_number: int) -> Non
     a retry that is still live in `oncall-agent` or the CLI; whichever writer
     locks the import row first wins, and the other changes nothing
     (`_docs/architecture.md` -> *Import processing*, step 5).
+
+    Telemetry: runs under the attempt's span (current), which gets the outcome
+    and the code; `catalog.import.validate` and, when validation passed,
+    `catalog.import.upsert` are its children. The attempt metrics count only
+    an end state this call actually wrote.
     """
+    started = time.monotonic()
+    attempt = telemetry.current_span()
+    ids = telemetry.log_ids(import_id=import_id, attempt_number=attempt_number)
+
+    def ended(outcome: str, code: str | None) -> None:
+        if attempt.is_recording():
+            attempt.set_attribute(telemetry.ATTR_OUTCOME, outcome)
+            if code is not None:
+                attempt.set_attribute(telemetry.ATTR_ERROR_CODE, code)
+        telemetry.record_attempt(outcome, code, time.monotonic() - started)
+
+    def superseded() -> None:
+        if attempt.is_recording():
+            attempt.set_attribute(telemetry.ATTR_SUPERSEDED, True)
+        _log_superseded(import_id, attempt_number)
+
     with _session() as session:
         with session.begin():
             row = session.execute(
@@ -142,7 +185,15 @@ def process_attempt(import_id: int, attempt_id: int, attempt_number: int) -> Non
         vendor_id, csv_bytes = row.vendor_id, row.csv_bytes
         inject = row.inject_transient_failure and attempt_number == 1
 
-        result = validate_csv(csv_bytes)
+        with telemetry.span(telemetry.SPAN_VALIDATE) as validate_span:
+            result = validate_csv(csv_bytes)
+            if validate_span.is_recording():
+                validate_span.set_attributes(
+                    {
+                        telemetry.ATTR_ROW_COUNT: result.row_count,
+                        telemetry.ATTR_VALIDATION_ERROR_COUNT: result.error_count,
+                    }
+                )
         if result.errors:
             # Validation wins over injection: the flag is never looked at here.
             with session.begin():
@@ -165,13 +216,16 @@ def process_attempt(import_id: int, attempt_id: int, attempt_number: int) -> Non
                         alerts.validation_reason(attempt_number, result.error_count),
                     )
             if not finished:
-                _log_superseded(import_id, attempt_number)
+                superseded()
                 return
+            ended(telemetry.FAILED, "VALIDATION_ERROR")
+            telemetry.record_products(0)
             log.info(
                 "import %d attempt %d failed: VALIDATION_ERROR, %d errors",
                 import_id,
                 attempt_number,
                 result.error_count,
+                extra=ids,
             )
             _log_alert(alert_id, import_id, "VALIDATION_ERROR", attempt_number)
             return
@@ -183,26 +237,34 @@ def process_attempt(import_id: int, attempt_id: int, attempt_number: int) -> Non
             # deadlock): a sweep that arrives later waits for this commit and
             # then finds nothing to do; a sweep that came first leaves an
             # import that is no longer PROCESSING, and nothing is written.
-            with session.begin():
-                live = _lock_live_attempt(session, import_id, attempt_id)
-                if live:
-                    if inject:
-                        raise InjectedTransientFailure
-                    _upsert_products(session, vendor_id, result.rows)
-                    _finish(
-                        session,
-                        import_id,
-                        attempt_id,
-                        succeeded=True,
-                        code=None,
-                        import_values={
-                            "row_count": result.row_count,
-                            "product_count": len(result.rows),
-                            "completed_at": func.now(),
-                            "validation_errors_json": [],
-                            "validation_error_count": 0,
-                        },
-                    )
+            with telemetry.span(telemetry.SPAN_UPSERT) as upsert_span:
+                live, written = False, 0
+                try:
+                    with session.begin():
+                        live = _lock_live_attempt(session, import_id, attempt_id)
+                        if live:
+                            if inject:
+                                raise InjectedTransientFailure
+                            _upsert_products(session, vendor_id, result.rows)
+                            _finish(
+                                session,
+                                import_id,
+                                attempt_id,
+                                succeeded=True,
+                                code=None,
+                                import_values={
+                                    "row_count": result.row_count,
+                                    "product_count": len(result.rows),
+                                    "completed_at": func.now(),
+                                    "validation_errors_json": [],
+                                    "validation_error_count": 0,
+                                },
+                            )
+                    written = len(result.rows) if live else 0  # committed
+                finally:
+                    # Rolled back (the exception is marked by `telemetry.span`): 0.
+                    if upsert_span.is_recording():
+                        upsert_span.set_attribute(telemetry.ATTR_PRODUCTS_WRITTEN, written)
         except Exception as exc:  # noqa: BLE001 - every runtime failure ends the attempt
             code, reason = _classify(exc, attempt_number)
             log.error(
@@ -211,6 +273,7 @@ def process_attempt(import_id: int, attempt_id: int, attempt_number: int) -> Non
                 attempt_number,
                 code,
                 type(exc).__name__,
+                extra=ids,
             )
             # If this write raises too, the request answers 500 and the import
             # stays PROCESSING with no alert until the next startup sweep.
@@ -226,18 +289,23 @@ def process_attempt(import_id: int, attempt_id: int, attempt_number: int) -> Non
                 if finished:
                     alert_id = alerts.record_failure_alert(session, import_id, reason)
             if finished:
+                ended(telemetry.FAILED, code)
+                telemetry.record_products(0)
                 _log_alert(alert_id, import_id, code, attempt_number)
             else:
-                _log_superseded(import_id, attempt_number)
+                superseded()
             return
     if not live:
-        _log_superseded(import_id, attempt_number)
+        superseded()
         return
+    ended(telemetry.SUCCEEDED, None)
+    telemetry.record_products(len(result.rows))
     log.info(
         "import %d attempt %d completed: %d products",
         import_id,
         attempt_number,
         len(result.rows),
+        extra=ids,
     )
 
 
@@ -262,6 +330,7 @@ def _log_superseded(import_id: int, attempt_number: int) -> None:
         "import %d attempt %d ended by the startup sweep first; nothing written",
         import_id,
         attempt_number,
+        extra=telemetry.log_ids(import_id=import_id, attempt_number=attempt_number),
     )
 
 
@@ -279,11 +348,19 @@ def _classify(exc: Exception, attempt_number: int) -> tuple[str, str]:
 
 def _log_alert(alert_id: int, import_id: int, code: str, attempt_number: int | None) -> None:
     """The one log line per alert write: ids, the code and the attempt number only."""
+    extra = telemetry.log_ids(import_id=import_id, attempt_number=attempt_number, alert_id=alert_id)
     if attempt_number is None:  # the startup sweep
-        log.warning("alert %d for import %d: %s (startup sweep)", alert_id, import_id, code)
+        log.warning(
+            "alert %d for import %d: %s (startup sweep)", alert_id, import_id, code, extra=extra
+        )
         return
     log.warning(
-        "alert %d for import %d: %s on attempt %d", alert_id, import_id, code, attempt_number
+        "alert %d for import %d: %s on attempt %d",
+        alert_id,
+        import_id,
+        code,
+        attempt_number,
+        extra=extra,
     )
 
 
@@ -376,6 +453,7 @@ def sweep_stuck_imports() -> int:
     this waits, then finds it no longer `PROCESSING` and leaves it alone; if
     this comes first, the retry finds its import ended and writes nothing.
     """
+    failed_attempts: list[Any] = []
     with _session() as session, session.begin():
         swept = list(
             session.execute(
@@ -391,13 +469,18 @@ def sweep_stuck_imports() -> int:
             ).scalars()
         )
         if swept:
-            session.execute(
+            failed_attempts = session.execute(
                 update(ImportAttempt)
                 .where(ImportAttempt.status == "RUNNING", ImportAttempt.import_id.in_(swept))
                 .values(status="FAILED", error_code="INTERNAL_ERROR", finished_at=func.now())
-            )
+                .returning(ImportAttempt.started_at, ImportAttempt.finished_at)
+            ).all()
         written = alerts.record_failure_alerts(
             session, [(import_id, alerts.SWEEP_REASON) for import_id in sorted(swept)]
+        )
+    for started_at, finished_at in failed_attempts:  # committed: each counts once
+        telemetry.record_attempt(
+            telemetry.FAILED, "INTERNAL_ERROR", (finished_at - started_at).total_seconds()
         )
     if swept:
         log.warning("startup sweep marked %d stuck imports FAILED / INTERNAL_ERROR", len(swept))

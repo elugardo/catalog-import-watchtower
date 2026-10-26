@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app import telemetry
 from app.db import get_sessionmaker
 from app.models import Alert
 from app.oncall import llm
@@ -116,13 +117,22 @@ def poll_once(client: Any, config: WorkerConfig) -> llm.RunSummary | None:
     with get_sessionmaker()() as session, session.begin():
         reset = alerts.reset_stale_claims(session, config.claim_timeout_seconds)
     for alert_id in reset:
-        log.info("oncall-agent: stale claim on alert %s returned to OPEN", alert_id)
+        log.info(
+            "oncall-agent: stale claim on alert %s returned to OPEN",
+            alert_id,
+            extra=telemetry.log_ids(alert_id=alert_id),
+        )
 
     claimed = claim_next()
     if claimed is None:
         return None
     alert_id, import_id = claimed
-    log.info("oncall-agent: claimed alert %s (import %s)", alert_id, import_id)
+    log.info(
+        "oncall-agent: claimed alert %s (import %s)",
+        alert_id,
+        import_id,
+        extra=telemetry.log_ids(alert_id=alert_id, import_id=import_id),
+    )
     return llm.run_alert(
         client, model=config.model, alert_id=alert_id, import_id=import_id, limits=config.limits
     )

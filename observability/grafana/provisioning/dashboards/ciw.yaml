@@ -1,0 +1,15 @@
+# Dashboard provider for Catalog Import Watchtower (CIW-09.2).
+# compose.yaml mounts this file next to the image's own providers, and the
+# folder observability/grafana/dashboards at /otel-lgtm/ciw-dashboards.
+# The datasources are the image's built-in ones (uids prometheus, loki, tempo).
+apiVersion: 1
+
+providers:
+  - name: "Catalog Import Watchtower"
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /otel-lgtm/ciw-dashboards
+      foldersFromFilesStructure: false

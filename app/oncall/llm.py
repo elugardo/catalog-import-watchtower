@@ -41,6 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from app import telemetry
 from app.db import get_sessionmaker
 from app.models import AgentAction
 from app.oncall import prompt
@@ -163,6 +164,7 @@ def _write_action(
 class _Call:
     content: str
     is_error: bool
+    outcome: str = ""  # the tool's result status: DONE, REFUSED or NOT_FOUND
     decision: str | None = None  # RESOLVED / NEEDS_ATTENTION when a deciding call was DONE
     reason: str | None = None  # the mark_needs_attention reason, when it decided
 
@@ -200,7 +202,32 @@ def _arguments(name: str, raw: Any, alert_id: int, import_id: int) -> dict[str, 
     return dict(raw)
 
 
+def _tool_span(name: str, alert_id: int, import_id: int) -> Any:
+    """One span per tool call, named after the tool; ids only, never an argument or a reason."""
+    span_name = name if name in ARGUMENTS else telemetry.SPAN_UNKNOWN_TOOL
+    return telemetry.span(span_name, telemetry.ids(alert_id=alert_id, import_id=import_id))
+
+
+def _tool_finished(span: Any, name: str, outcome: str, alert_id: int, import_id: int) -> None:
+    if span.is_recording():
+        span.set_attribute(telemetry.ATTR_TOOL_OUTCOME, outcome)
+    log.info(
+        "oncall-agent: tool %s on alert %s: %s",
+        name if name in ARGUMENTS else telemetry.SPAN_UNKNOWN_TOOL,
+        alert_id,
+        outcome,
+        extra=telemetry.log_ids(alert_id=alert_id, import_id=import_id),
+    )
+
+
 def _dispatch(name: str, raw: Any, alert_id: int, import_id: int) -> _Call:
+    with _tool_span(name, alert_id, import_id) as span:
+        call = _dispatch_call(name, raw, alert_id, import_id)
+        _tool_finished(span, name, call.outcome, alert_id, import_id)
+    return call
+
+
+def _dispatch_call(name: str, raw: Any, alert_id: int, import_id: int) -> _Call:
     try:
         arguments = _arguments(name, raw, alert_id, import_id)
     except _Refusal as refusal:
@@ -211,10 +238,14 @@ def _dispatch(name: str, raw: Any, alert_id: int, import_id: int) -> _Call:
             reason_summary=f"refused by the worker: {refusal.problem}",
             result={"outcome": agent_tools.REFUSED, "alert_id": alert_id, "import_id": import_id},
         )
-        return _Call(json.dumps({"error": f"refused: {refusal.problem}"}), is_error=True)
+        return _Call(
+            json.dumps({"error": f"refused: {refusal.problem}"}),
+            is_error=True,
+            outcome=agent_tools.REFUSED,
+        )
 
     result = agent_tools.TOOLS[name](**arguments)
-    call = _Call(json.dumps(result), is_error=False)
+    call = _Call(json.dumps(result), is_error=False, outcome=str(result.get("outcome")))
     if result.get("outcome") == agent_tools.DONE:
         if name == "resolve_alert":
             call.decision = RESOLVED
@@ -264,15 +295,46 @@ def run_alert(
     clock: Callable[[], float] = time.monotonic,
 ) -> RunSummary:
     """Run one conversation on a claimed (`IN_PROGRESS`) alert and close it. Never raises
-    for a provider or tool error; a database outage can still raise from the audit writes."""
+    for a provider or tool error; a database outage can still raise from the audit writes.
+
+    The run is its own trace: a root `catalog.agent.run` span with the two ids
+    and, at the end, the run's outcome and tool-call count; each tool call is a
+    child span (`_dispatch`), and a retry's attempt 2 a child of its tool span.
+    Nothing of the prompt, the replies or the model's reason text goes on a span.
+    """
+    with telemetry.span(
+        telemetry.SPAN_AGENT_RUN,
+        telemetry.ids(alert_id=alert_id, import_id=import_id),
+        root=True,
+    ) as span:
+        summary = _run_alert(
+            client, model=model, alert_id=alert_id, import_id=import_id, limits=limits, clock=clock
+        )
+        if span.is_recording():
+            span.set_attribute(telemetry.ATTR_AGENT_OUTCOME, summary.outcome)
+            span.set_attribute(telemetry.ATTR_AGENT_TOOL_CALLS, summary.tool_calls)
+    return summary
+
+
+def _run_alert(
+    client: Any,
+    *,
+    model: str,
+    alert_id: int,
+    import_id: int,
+    limits: Limits,
+    clock: Callable[[], float],
+) -> RunSummary:
     started = clock()
     deadline = started + limits.timeout_seconds
+    ids = telemetry.log_ids(alert_id=alert_id, import_id=import_id)
     _write_action(
         alert_id,
         "RUN_STARTED",
         reason_summary=f"provider {PROVIDER}, model {model}",
         result={"provider": PROVIDER, "model": model},
     )
+    log.info("oncall-agent: run on alert %s started", alert_id, extra=ids)
 
     calls = 0
     decision: str | None = None
@@ -338,25 +400,27 @@ def run_alert(
             messages.append({"role": "user", "content": results})
     except Exception as exc:  # noqa: BLE001 - recorded by type only
         error_type = type(exc).__name__
-        log.warning("oncall-agent: run on alert %s raised %s", alert_id, error_type)
+        log.warning("oncall-agent: run on alert %s raised %s", alert_id, error_type, extra=ids)
         _write_action(
             alert_id, "ERROR", reason_summary=error_type, result={"error_type": error_type}
         )
         close_reason = f"agent run failed ({error_type})"
 
-    summary = _close(alert_id, decision, close_reason, calls, started, clock)
+    summary = _close(alert_id, import_id, decision, close_reason, calls, started, clock)
     log.info(
         "oncall-agent: run on alert %s finished: %s after %s tool calls (closed by %s)",
         alert_id,
         summary.outcome,
         summary.tool_calls,
         summary.closed_by,
+        extra=ids,
     )
     return summary
 
 
 def _close(
     alert_id: int,
+    import_id: int,
     decision: str | None,
     close_reason: str | None,
     calls: int,
@@ -368,7 +432,9 @@ def _close(
         summary = RunSummary(decision, calls, 0, closed_by="model")
     else:
         reason = close_reason or REASON_NO_DECISION
-        result = agent_tools.mark_needs_attention(alert_id, reason)
+        with _tool_span("mark_needs_attention", alert_id, import_id) as span:
+            result = agent_tools.mark_needs_attention(alert_id, reason)
+            _tool_finished(span, "mark_needs_attention", result["outcome"], alert_id, import_id)
         if result["outcome"] == agent_tools.DONE:
             summary = RunSummary(NEEDS_ATTENTION, calls, 0, "worker", close_reason=reason)
         else:  # another worker reset or acted on the alert: record it, do not raise

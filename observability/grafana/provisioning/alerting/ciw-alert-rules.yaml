@@ -1,0 +1,60 @@
+# The one Grafana alert rule of Catalog Import Watchtower (CIW-09.2, spec section 10).
+# It is the *visible alert* (_docs/operations.md -> Alerting, layer 2): it fires
+# while any user-impact alert is OPEN or IN_PROGRESS. There is deliberately no
+# contact point, notification policy, webhook or email anywhere in observability/:
+# the rule wakes nothing; the durable alert in the database is what the worker polls.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: catalog-imports
+    folder: CIW alerts
+    # A multiple of Grafana's 10 s scheduler tick; with the 60 s metric export the rule
+    # fires within about 90 s of a failed import (export + one evaluation + pending).
+    interval: 10s
+    rules:
+      - uid: ciw-catalog-import-failed
+        title: Catalog import failed
+        condition: B
+        data:
+          # One series: max() without `by`, so two open alerts give one instance of value 2.
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: max(catalog_import_alerts_open)
+              instant: true
+              range: false
+              intervalMs: 10000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: math
+              expression: $A > 0
+        # A fresh stack (before the first export) and a stopped db report no value: Normal.
+        noDataState: OK
+        execErrState: OK
+        for: 20s
+        isPaused: false
+        labels:
+          team: ciw
+        annotations:
+          summary: A catalog import failed and its user-impact alert is open (OPEN or IN_PROGRESS). See the app's import list for which one.
+          description: "Open alerts: {{ $values.A.Value }}. Dashboard: /d/ciw-overview/catalog-import-watchtower"
+          runbook_url: _docs/operations.md#runbook
+          __dashboardUid__: ciw-overview
+          __panelId__: "3"

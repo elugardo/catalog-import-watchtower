@@ -192,6 +192,12 @@ review, QA, PM approval, merge on green CI, close with evidence.
   open-ended extra hunts; PM approval is a quick check of the record.
 - **#44 is parked.** CIW-06.1 earns no rubric points and runs only if time
   remains.
+- **Merge on green CI, verdicts after (from 2026-10-26).** Marcos asked that
+  merges not wait on him or on the review loop: the orchestrator merges a PR
+  as soon as its CI is green after the engineer's hand-off, then runs QA and
+  PM approval on the merged code. A FAIL or CHANGES REQUESTED is fixed forward
+  in a new PR, and the issue closes only after both verdicts are recorded.
+  First applied to #11 (PR #55).
 
 ## Order and dependencies
 

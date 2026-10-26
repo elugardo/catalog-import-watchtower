@@ -1,0 +1,159 @@
+# Promote to production (CIW-10.2, spec section 11, ADR-0002).
+#
+# Manual only: `gh workflow run promote-prod.yml -f tag=sha-<full SHA>`.
+# It deploys the EXACT image that deploy-dev.yml already built, published and
+# ran in development; nothing is built here or on Fly.
+#
+#   1. validate (no environment, no secret, no flyctl): refuses the input
+#      unless (a) it is exactly `sha-` + 40 lowercase hex characters,
+#      (b) that tag exists in GHCR, and (c) deploy-dev.yml has a successful
+#      run for that commit. A bad input fails here, before any approval is
+#      requested.
+#   2. deploy (GitHub environment `production`, so Marcos must approve it):
+#      `flyctl deploy --config fly.prod.toml -a ciw-prod --image ...:<tag>
+#      --process-groups app`, keep zero worker machines, then smoke-check
+#      https://ciw-prod.fly.dev/api/health for 200, db ok and version <tag>.
+#
+# Rollback is the same workflow with the previous tag (operations.md ->
+# Rollback). Secrets: only FLY_API_TOKEN, a deploy token scoped to ciw-prod,
+# stored in the `production` environment and read only by the deploy job.
+# Nothing is ever echoed. The only Fly app named here is ciw-prod.
+
+name: Promote to production
+
+run-name: Promote ${{ inputs.tag }} to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag that dev already ran: sha-<full 40-character lowercase commit SHA>"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash # bash -eo pipefail
+
+env:
+  IMAGE: ghcr.io/elugardo/catalog-import-watchtower
+  FLY_APP: ciw-prod
+  PROD_URL: https://ciw-prod.fly.dev
+
+jobs:
+  validate:
+    name: Validate the tag (before any approval)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read # check (c): list deploy-dev.yml runs
+    outputs:
+      tag: ${{ steps.format.outputs.tag }}
+    steps:
+      # The input reaches the shell only through an environment variable,
+      # never by template expansion into the script. %q prints it escaped,
+      # so an odd input cannot inject a workflow command into the log.
+      - name: (a) Tag is sha- plus the full 40-character lowercase hex SHA
+        id: format
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^sha-[0123456789abcdef]{40}$ ]]; then
+            printf '::error::Refused: tag %q is not sha- followed by the full 40-character lowercase hex commit SHA. Moving tags (dev, latest), short or uppercase SHAs, surrounding spaces and an empty input are refused.\n' "$TAG"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "format ok: $TAG"
+      - name: (b) Tag exists in GHCR
+        env:
+          TAG: ${{ steps.format.outputs.tag }}
+        run: |
+          if ! docker manifest inspect "$IMAGE:$TAG" > /dev/null 2> manifest.err; then
+            echo "::error::Refused: $IMAGE:$TAG does not exist in GHCR (or the package is not public). Only a tag that deploy-dev.yml published can be promoted."
+            sed 's/^/  registry: /' manifest.err
+            exit 1
+          fi
+          echo "GHCR has $IMAGE:$TAG"
+      - name: (c) deploy-dev.yml ran this commit successfully
+        env:
+          TAG: ${{ steps.format.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${TAG#sha-}"
+          runs="repos/$GITHUB_REPOSITORY/actions/workflows/deploy-dev.yml/runs?head_sha=$sha&status=success&per_page=1"
+          count=$(gh api "$runs" --jq '.total_count')
+          if [ "$count" -lt 1 ]; then
+            echo "::error::Refused: dev never ran $TAG (no successful deploy-dev.yml run for commit $sha). Promote only an image that development deployed and smoke-checked."
+            exit 1
+          fi
+          echo "dev ran it: $(gh api "$runs" --jq '.workflow_runs[0].html_url')"
+
+  deploy:
+    name: Deploy to ciw-prod and smoke-check
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ env.PROD_URL }}
+    # One promotion at a time, never cancelled midway: a second dispatch
+    # waits until the running one ends (GitHub keeps only the newest waiting
+    # run, so a third dispatch replaces a second that has not started).
+    concurrency:
+      group: promote-prod
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.validate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4 # for fly.prod.toml and scripts/smoke_check.py
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
+        with:
+          version: 0.4.122
+      - name: Fail early if the deploy token is not configured
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::FLY_API_TOKEN is not set in the 'production' environment (_docs/operations.md -> Deployment -> Provisioning)"
+            exit 1
+          fi
+      # The release being replaced is the rollback target; print its image
+      # so the run log names it (empty on the first promotion).
+      - name: Image running on ciw-prod before this promotion
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl machines list -a "$FLY_APP" --json > before.json
+          jq -r '[(. // [])[] | select(.config.metadata.fly_process_group == "app") | .config.image] | unique | .[]' before.json
+      # `--image`: Fly pulls the public image; nothing is built here or on
+      # Fly. `--process-groups app`: only the HTTP group gets machines; the
+      # worker group stays at zero (fly.prod.toml). `--ha=false`: one app
+      # machine, stopped when idle.
+      - name: flyctl deploy --config fly.prod.toml -a ciw-prod --image <image>:<tag>
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --config fly.prod.toml -a "$FLY_APP" \
+            --image "$IMAGE:$TAG" \
+            --process-groups app \
+            --ha=false \
+            --wait-timeout 5m0s
+      - name: Keep zero worker machines on ciw-prod
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl machines list -a "$FLY_APP" --json > machines.json
+          workers=$(jq '[.[] | select(.config.metadata.fly_process_group == "worker")] | length' machines.json)
+          if [ "$workers" -gt 0 ]; then
+            echo "removing $workers worker machine(s): ciw-prod runs none (AGENT_ENABLED=false)"
+            flyctl scale count worker=0 -a "$FLY_APP" --yes
+            flyctl machines list -a "$FLY_APP" --json > machines.json
+          fi
+          echo "process group / state / image"
+          jq -r '.[] | "\(.config.metadata.fly_process_group // "?")\t\(.state)\t\(.config.image // "")"' machines.json
+          test "$(jq '[.[] | select(.config.metadata.fly_process_group == "worker")] | length' machines.json)" = 0
+      - name: Smoke check /api/health (200, db ok, version = the promoted tag)
+        run: python3 scripts/smoke_check.py "$PROD_URL" "$TAG" --attempts 30 --interval 10

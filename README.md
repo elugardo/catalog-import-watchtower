@@ -21,6 +21,9 @@ workflow, limitations).
 - Development deployment: <https://ciw-dev.fly.dev> (health:
   [`/api/health`](https://ciw-dev.fly.dev/api/health)); deployed by
   `.github/workflows/deploy-dev.yml` on every push to `main`
+- Production deployment: <https://ciw-prod.fly.dev> (health:
+  [`/api/health`](https://ciw-prod.fly.dev/api/health)); promoted by hand
+  with `.github/workflows/promote-prod.yml` after approval
 - Specification: [`_docs/spec.md`](_docs/spec.md)
 - How work is organized: [`AGENTS.md`](AGENTS.md) and
   [`_docs/process.md`](_docs/process.md)

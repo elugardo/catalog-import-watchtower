@@ -18,9 +18,9 @@ app/static/
 .pytest_cache/
 .ruff_cache/
 
-# Not needed to run the tests.
+# Not needed to run the tests. (.github/ stays in: the unit tests read
+# .github/workflows/promote-prod.yml; workflow files hold no secret.)
 .git/
-.github/
 .claude/
 .agents/
 _docs/

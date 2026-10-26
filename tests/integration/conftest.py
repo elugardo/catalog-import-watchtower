@@ -27,7 +27,8 @@ from sqlalchemy import Engine, create_engine, make_url, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.settings import Settings
+from app.db import get_engine
+from app.settings import Settings, get_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -88,7 +89,15 @@ def database_url() -> Iterator[str]:
     suite_url = url.set(database=name).render_as_string(hide_password=False)
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("DATABASE_URL", suite_url)
-        yield suite_url
+        # Settings and the engine are cached per process: one cached earlier in the
+        # session (a unit test) would still point at the configured database.
+        get_settings.cache_clear()
+        get_engine.cache_clear()
+        try:
+            yield suite_url
+        finally:
+            get_settings.cache_clear()
+            get_engine.cache_clear()
 
 
 @pytest.fixture(scope="session", autouse=True)

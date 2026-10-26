@@ -14,6 +14,7 @@ non-empty. The SDK reads the value itself (`llm.make_client`).
 from __future__ import annotations
 
 import logging
+import math
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -41,7 +42,7 @@ def _number(name: str, default: float, kind: type = float) -> Any:
         value = kind(raw)
     except ValueError:
         value = 0
-    if not value > 0:  # also NaN
+    if not (value > 0 and math.isfinite(value)):  # also NaN, inf and overflowing values
         # Names the variable, never the value; the worker then idles with this reason.
         raise ValueError(f"{name} is not a positive {'integer' if kind is int else 'number'}")
     return value

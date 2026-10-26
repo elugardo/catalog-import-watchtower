@@ -65,6 +65,13 @@ def _idle_line(caplog) -> str:
         ("AGENT_MAX_TOOL_CALLS", f"8-{CANARY}", "AGENT_MAX_TOOL_CALLS is not a positive integer"),
         ("AGENT_MAX_TOOL_CALLS", "0", "AGENT_MAX_TOOL_CALLS is not a positive integer"),
         ("AGENT_TIMEOUT_SECONDS", "nan", "AGENT_TIMEOUT_SECONDS is not a positive number"),
+        ("AGENT_POLL_SECONDS", "inf", "AGENT_POLL_SECONDS is not a positive number"),
+        (
+            "AGENT_CLAIM_TIMEOUT_SECONDS",
+            "1e400",
+            "AGENT_CLAIM_TIMEOUT_SECONDS is not a positive number",
+        ),
+        ("AGENT_ENABLED", f"maybe-{CANARY}", "AGENT_ENABLED is not valid"),
     ],
     ids=lambda v: repr(v)[:30],
 )

@@ -17,6 +17,8 @@ import signal
 import sys
 import threading
 
+from pydantic import ValidationError
+
 log = logging.getLogger("app.oncall")
 
 
@@ -36,6 +38,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config: poller.WorkerConfig | None = poller.WorkerConfig.from_env()
         reason = poller.idle_reason(config)
+    except ValidationError as exc:  # app.settings: its message quotes the value, never log it
+        fields = ", ".join(sorted({str(error["loc"][0]).upper() for error in exc.errors()}))
+        config, reason = None, f"{fields or 'a setting'} is not valid"
     except ValueError as exc:  # a tuning variable that is not a positive number
         config, reason = None, str(exc)
     stop = threading.Event()

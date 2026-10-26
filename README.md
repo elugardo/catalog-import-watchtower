@@ -24,7 +24,7 @@ built the project from it through public GitHub issues (see
 - the Grafana dashboard and alert rule with their walkthrough (#13)
 - CI/CD with dev and prod deployments, promotion and rollback (#14, #15)
 
-#13 is merged, and its QA verdict is pending. #44 is parked. The
+#13 is merged, with QA PASS and PM approval. #44 is parked. The
 [Rubric evidence](#rubric-evidence) table gives the status of each row.
 
 ## Problem
@@ -274,7 +274,7 @@ Grafana at http://localhost:3000, with anonymous access and no login.
 
 **Evidence.**
 [`_docs/evidence/2026-10-26-observability/report.md`](_docs/evidence/2026-10-26-observability/report.md)
-(#13; its QA verdict is pending) contains:
+(#13) contains:
 - [Tempo trace](_docs/evidence/2026-10-26-observability/01-tempo-failed-attempt-trace.png)
 - [Loki logs for that trace](_docs/evidence/2026-10-26-observability/02-loki-logs-for-trace.png)
 - [dashboard](_docs/evidence/2026-10-26-observability/03-dashboard.png)
@@ -451,8 +451,8 @@ when every artefact it names is on `main`.
 | 7 | Containerization | done | [`compose.yaml`](compose.yaml), [`Dockerfile`](Dockerfile), [`compose.test.yaml`](compose.test.yaml), [`Dockerfile.test`](Dockerfile.test) |
 | 8 | Deployment | done | dev and prod are live ([Deployment](#deployment-and-cicd)); [ADR-0002](_docs/adr/0002-deployment-provider.md); [dev report](_docs/evidence/2026-10-26-deploy-dev/report.md) with a [dev health screenshot](_docs/evidence/2026-10-26-deploy-dev/05-api-health.jpg); [prod report](_docs/evidence/2026-10-26-deploy-prod/report.md) with a [prod health screenshot](_docs/evidence/2026-10-26-deploy-prod/04-prod-health.png) and the [prod dashboard](_docs/evidence/2026-10-26-deploy-prod/03-prod-dashboard.png) |
 | 9 | CI/CD | done | [`.github/workflows/`](.github/workflows/); PR run [40267315673](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40267315673), dev deploy [40320919888](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40320919888), promotion [40321537500](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40321537500), rollback [40323819935](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40323819935); [*Rollback*](_docs/operations.md#rollback-issue-10); [dev](_docs/evidence/2026-10-26-deploy-dev/report.md) and [prod](_docs/evidence/2026-10-26-deploy-prod/report.md) reports |
-| 10 | Observability | done (#13 QA pending) | [`observability/`](observability/); [walkthrough](_docs/evidence/2026-10-26-observability/report.md) with the [Tempo trace](_docs/evidence/2026-10-26-observability/01-tempo-failed-attempt-trace.png), the [Loki logs for the same `trace_id`](_docs/evidence/2026-10-26-observability/02-loki-logs-for-trace.png) and the [dashboard](_docs/evidence/2026-10-26-observability/03-dashboard.png); query cheat-sheet in [`operations.md` -> *Telemetry*](_docs/operations.md#telemetry-issue-09-instrumentation-in-ciw-091-12-grafana-in-ciw-092-13) |
-| 11 | Alerting on user impact | done (#13 QA pending) | the durable alert in the UI ([report](_docs/evidence/2026-10-25-user-impact-alert/report.md), [screenshot](_docs/evidence/2026-10-25-user-impact-alert/dashboard-open-incidents.jpg)); the provisioned rule [`ciw-alert-rules.yaml`](observability/grafana/provisioning/alerting/ciw-alert-rules.yaml), shown [firing](_docs/evidence/2026-10-26-observability/04a-rule-firing-runA.png) and [back to Normal](_docs/evidence/2026-10-26-observability/04b-rule-normal-runB.png) |
+| 10 | Observability | done | [`observability/`](observability/); [walkthrough](_docs/evidence/2026-10-26-observability/report.md) with the [Tempo trace](_docs/evidence/2026-10-26-observability/01-tempo-failed-attempt-trace.png), the [Loki logs for the same `trace_id`](_docs/evidence/2026-10-26-observability/02-loki-logs-for-trace.png) and the [dashboard](_docs/evidence/2026-10-26-observability/03-dashboard.png); query cheat-sheet in [`operations.md` -> *Telemetry*](_docs/operations.md#telemetry-issue-09-instrumentation-in-ciw-091-12-grafana-in-ciw-092-13) |
+| 11 | Alerting on user impact | done | the durable alert in the UI ([report](_docs/evidence/2026-10-25-user-impact-alert/report.md), [screenshot](_docs/evidence/2026-10-25-user-impact-alert/dashboard-open-incidents.jpg)); the provisioned rule [`ciw-alert-rules.yaml`](observability/grafana/provisioning/alerting/ciw-alert-rules.yaml), shown [firing](_docs/evidence/2026-10-26-observability/04a-rule-firing-runA.png) and [back to Normal](_docs/evidence/2026-10-26-observability/04b-rule-normal-runB.png) |
 | 12 | On-call agent | done | [`app/oncall/`](app/oncall/); [real-LLM recovery](_docs/evidence/2026-10-26-real-llm-recovery/report.md) with [two attempts and the timeline](_docs/evidence/2026-10-26-real-llm-recovery/import-detail-attempts-and-timeline.jpg) |
 
 ## Demo
@@ -554,7 +554,6 @@ recorded real-LLM run shows the rest.
   and the alert rule firing, then back to Normal
   ([firing](_docs/evidence/2026-10-26-observability/04a-rule-firing-runA.png),
   [Normal](_docs/evidence/2026-10-26-observability/04b-rule-normal-runB.png)).
-  #13's QA verdict is pending.
 - **Green runs:** CI on `main` [40332945673](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40332945673),
   PR CI [40326156089](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40326156089)
   and dev deploy [40320919888](https://github.com/elugardo/catalog-import-watchtower/actions/runs/40320919888).

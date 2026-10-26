@@ -38,7 +38,7 @@ State of every `final-project` issue, from `gh issue list --label final-project 
 Nothing was closed or edited to make this list look complete.
 
 - **Closed:** #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #14, #15, #24, #40; follow-ups #18, #22, #27, #28, #31, #36, #47, #50, #63.
-- **Open, merged, QA pending:** #13 (PR #66 merged as `fa6ce19`; observability evidence on `main`).
+- **Merged, QA PASS and PM approved:** #13 (PR #66 merged as `fa6ce19`).
 - **Open, this issue:** #16 (README, demo, rubric evidence).
 - **Parked (deadline mode):** #44 (CIW-06.1).
 

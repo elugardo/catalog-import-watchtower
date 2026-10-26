@@ -17,7 +17,9 @@ with safe placeholders. The app runs with none of the optional ones set.
 | `LLM_PROVIDER`, `LLM_MODEL` | oncall-agent | when enabled | provider id (`anthropic`, the only one supported; the official `anthropic` Python SDK) and model name (the local `.env` uses `claude-haiku-5-5`) |
 | `ANTHROPIC_API_KEY` | oncall-agent | when enabled | the provider key; only in the git-ignored `.env`. `compose.yaml` passes it to `oncall-agent` only (`app`, `test` and CI get none); the worker never reads or logs the value, it only checks that it is set and the SDK reads it |
 | `AGENT_POLL_SECONDS`, `AGENT_CLAIM_TIMEOUT_SECONDS`, `AGENT_MAX_TOOL_CALLS`, `AGENT_TIMEOUT_SECONDS` | oncall-agent | no | 10 / 300 / 8 / 120: poll interval, stale-claim timeout, model tool calls per run (the one after is not executed), wall time per run (each provider call gets only what is left) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_SDK_DISABLED` | app, oncall-agent | no | telemetry; disabled in tests and (by default) when deployed |
+| `OTEL_SDK_DISABLED` | app, oncall-agent | no (default `true` outside Compose) | `false` turns on OTLP export of traces, metrics and logs (`app/telemetry.py`). `compose.yaml` defaults it to `false` for `app` and `oncall-agent`; the test overlay (`compose.test.yaml`), `fly.toml` and `fly.prod.toml` set `true`; unset (`uv run`, the tests) means off |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | app, oncall-agent | no (Compose: `http://otel-lgtm:4318`; outside: `http://localhost:4318`) | OTLP/HTTP base URL; `/v1/traces`, `/v1/metrics`, `/v1/logs` are appended |
+| `OTEL_SERVICE_NAME` | app, oncall-agent | no | `compose.yaml` sets `ciw-app` and `ciw-oncall-agent`; the CLI (`python -m app.oncall tools …`) uses its container's value; unset, each process uses its own name |
 | `APP_PORT` | compose | no | host port for the app (default 8000) |
 | `DB_PORT` | compose | no | host port for the database (default 5432); the containers always use `db:5432` |
 | `APP_VERSION` | image **build argument** (`ARG APP_VERSION=dev` in the Dockerfile, passed by `compose.yaml` → `build.args`); also read as an env var by `app.settings` | no (default `dev`) | becomes `version` on `/api/health`; `APP_VERSION=abc123 docker compose build` bakes `abc123` into the image; CI sets it to the commit SHA (issue 10) |
@@ -48,7 +50,8 @@ default); it recovers by itself when `db` is back.
 | app | http://localhost:8000 and http://localhost:8000/api/health | SPA and API, same origin; any non-`/api` path serves the SPA (history fallback); unknown `/api/...` is a 404 in the error shape |
 | db | `localhost:5432` (`DB_PORT`), user / password / database `ciw` / `ciw` / `ciw` | PostgreSQL 16; named volume `pgdata` |
 | Grafana | http://localhost:3000 (health: `/api/health`) | `grafana/otel-lgtm`; anonymous admin, no login form; dashboard and alert rule arrive with issue 09 |
-| oncall-agent | `docker compose logs -f oncall-agent` | no port; without credentials it logs one line, `oncall-agent: idle because <reason>` (`AGENT_ENABLED is not true`, `LLM_PROVIDER is not anthropic`, `ANTHROPIC_API_KEY is not set` or `LLM_MODEL is not set`; never a value), and claims nothing. With them it logs `polling every <n>s (provider anthropic, model <model>)`, then one line per claim and per finished run |
+| otel-lgtm (OTLP) | `otel-lgtm:4318` inside the network, no host port | `app` and `oncall-agent` export to it (telemetry on by default in Compose) and depend on it being *started*, not healthy, so its slow cold start never holds them up; until it answers, export fails in the background and requests are not slowed |
+| oncall-agent | `docker compose logs -f oncall-agent` | no port; logs are JSON lines on stderr; without credentials it logs one line, `oncall-agent: idle because <reason>` (`AGENT_ENABLED is not true`, `LLM_PROVIDER is not anthropic`, `ANTHROPIC_API_KEY is not set` or `LLM_MODEL is not set`; never a value), and claims nothing. With them it logs `polling every <n>s (provider anthropic, model <model>)`, then one line per claim and per finished run |
 
 Development without rebuilding the image: `docker compose up db` for the
 database, `uv run uvicorn app.main:app --reload` for the API on :8000 (`/`
@@ -57,19 +60,64 @@ answers 404 `NOT_FOUND` until a bundle exists under `app/static/`), and
 `npm run build` in `web/` writes `web/dist/`, which the Dockerfile copies to
 `app/static/`.
 
-## Telemetry *(issue 09)*
+## Telemetry *(issue 09: instrumentation in CIW-09.1, Grafana in CIW-09.2)*
 
-Requirements (spec §10), to be met and then documented here with the real
-names and queries:
+`app/telemetry.py` sets up the OpenTelemetry SDK in both processes, with
+OTLP/HTTP export to `OTEL_EXPORTER_OTLP_ENDPOINT` when `OTEL_SDK_DISABLED`
+is `false` (see *Configuration*). Off, every span and metric call is a
+no-op, no exporter is created and `import_attempts.trace_id` stays `NULL`
+(never 32 zeros). Export is batched on background threads: an unreachable
+collector never slows a request. Tests install in-memory exporters through
+`telemetry.install` (`tests/integration/otel.py`).
 
-- **Traces:** one span per request; a `catalog.import.attempt` span per
-  attempt with attributes `import_id`, `attempt_number`, `outcome`,
-  `error_code`; child spans for validation and the upsert transaction; the
-  agent run as its own trace with `alert_id` and tool-call spans.
-- **Logs:** structured (JSON), every record carrying `trace_id`, `span_id`,
-  and where relevant `import_id`, `attempt_number`, `alert_id`. The attempt's
-  `trace_id` is also stored in `import_attempts.trace_id`, so the detail page
-  can link to the trace.
+- **Traces:**
+  - One server span per HTTP request (FastAPI instrumentation), named
+    `<METHOD> <route template>`, e.g. `POST /api/imports`,
+    `GET /api/imports/{id}`, never the raw path. An unhandled 500 sets
+    `exception.type` on it (from `UnhandledErrorMiddleware`), never a message
+    or a stack trace; the instrumentation wraps the whole middleware stack
+    from the outside, so `UnhandledErrorMiddleware` stays the outermost user
+    middleware and the instrumentation never sees the exception.
+  - `catalog.import.attempt`, one per attempt: `catalog.import.id`,
+    `catalog.import.attempt_number`, `catalog.import.outcome` (`SUCCEEDED` or
+    `FAILED`), `catalog.import.error_code` (`VALIDATION_ERROR`,
+    `TRANSIENT_STORAGE_TIMEOUT` or `INTERNAL_ERROR`; absent on success);
+    `catalog.import.superseded=true` instead of an outcome when the startup
+    sweep ended the attempt first. Children: `catalog.import.validate`
+    (`catalog.import.row_count`, `catalog.import.validation_error_count`) and,
+    only when validation passed, `catalog.import.upsert` (the one transaction;
+    `catalog.import.products_written`, 0 on a rollback; status `ERROR` with no
+    description and `exception.type` on a failure).
+  - Attempt 1 is a child of the `POST /api/imports` server span. The agent's
+    retry (attempt 2) is a child of the run's `retry_failed_import` tool span;
+    a retry through the CLI is the root of its own trace.
+  - `catalog.agent.run`, the root of one trace per agent run:
+    `catalog.alert.id`, `catalog.import.id`, `catalog.agent.outcome` (the
+    run's outcome, e.g. `RESOLVED`, `NEEDS_ATTENTION`) and
+    `catalog.agent.tool_calls`. One child span per tool call, named after the
+    tool (`get_import_incident` … `resolve_alert`; `unknown_tool` for a name
+    that is not a tool), with the two ids and `catalog.agent.tool.outcome`
+    (`DONE`, `REFUSED`, `NOT_FOUND`); the worker's closing
+    `mark_needs_attention` is one too. No span carries a prompt, a reply,
+    an argument other than the ids, or a `mark_needs_attention` reason.
+  - No span records an exception event (`record_exception` is off
+    everywhere); only `exception.type`. No SQLAlchemy or LLM-HTTP
+    auto-instrumentation (a database error's text would quote row values).
+- **Trace id on the attempt:** the attempt span's trace id (32 lowercase hex)
+  is written to `import_attempts.trace_id` when the attempt starts and
+  returned by `GET /api/imports/{id}`; `get_import_diagnostics` returns a
+  `trace_query` for it (placeholder text until #13).
+- **Logs:** both processes write JSON lines to stderr, one object per line:
+  `timestamp` (UTC ISO 8601, `Z`), `level`, `logger`, `message`, `trace_id`
+  and `span_id` (absent outside a span), and where the code has them
+  `import_id`, `attempt_number`, `alert_id`; `exception_type` when a record
+  has `exc_info` (never the message or the traceback). The CLI's stdout stays
+  its one JSON result. With the SDK on, the same records are exported
+  through the SDK's log handler, with attributes `import_id`,
+  `attempt_number`, `alert_id` and `exception.type` only (never
+  `exception.message` or `exception.stacktrace`). Lifecycle lines: import
+  created, attempt finished (outcome, code), alert written, the worker's
+  claim, run started and finished, each tool call (name and result status).
 
   **Errors are logged by exception type, already before CIW-09.1.** A failed
   attempt logs its `import_id`, attempt number, code and the exception's
@@ -84,11 +132,28 @@ names and queries:
   response had already started, uvicorn adds its own one-line
   `ASGI callable returned without completing response`, also type-free).
   Uvicorn access lines (method, path, status) stay.
-- **Metrics:** `catalog_import_attempts_total{outcome,error_category}`,
-  `catalog_import_duration_seconds` (histogram),
-  `catalog_products_upserted_total`, `catalog_import_alerts_open` (gauge),
-  plus the HTTP server duration histogram. Labels are low-cardinality only:
-  no ids, no names.
+- **Metrics** (OTel instrument → Prometheus series in otel-lgtm):
+  - `catalog.import.attempts` → `catalog_import_attempts_total{outcome, error_category}`:
+    `outcome` `SUCCEEDED` / `FAILED`, `error_category` one of the three codes
+    or `none`. One increment per end state actually written (a writer that
+    loses the race to the startup sweep adds nothing; the sweep counts the
+    attempts it fails as `FAILED` / `INTERNAL_ERROR`).
+  - `catalog.import.duration` (s) → `catalog_import_duration_seconds_bucket|_sum|_count{outcome}`:
+    one observation per finished attempt.
+  - `catalog.products.upserted` → `catalog_products_upserted_total`, no
+    labels: the products written by committed attempts (a failed one adds 0).
+  - `catalog.import.alerts.open` → `catalog_import_alerts_open`, no labels:
+    observable gauge counting `OPEN` plus `IN_PROGRESS` alerts at each
+    collection, **reported by `app` only** (never `oncall-agent` or the CLI,
+    so it is not doubled). Database down: no value, one log line with the
+    exception type.
+  - `http.server.request.duration` (FastAPI instrumentation, stable HTTP
+    conventions) → `http_server_request_duration_seconds_*{http_request_method,
+    http_route, http_response_status_code, url_scheme, network_protocol_version}`.
+    The instrumentation's other HTTP instruments are dropped.
+  Labels are low-cardinality only: no ids, trace ids, names, SKUs,
+  filenames or raw paths. The pipeline adds `service_name` and the SDK's
+  resource labels.
 - **Never exported:** CSV content, vendor or product names, SKUs, tokens,
   credentials, request bodies.
 - **Pipeline:** both processes → OTLP → the `grafana/otel-lgtm` container
@@ -101,8 +166,11 @@ names and queries:
   Grafana Explore → Tempo trace → its logs in Loki → the metric panel that
   moved. Screenshot of each stored under `_docs/evidence/`.
 
-Query cheat-sheet (fill in): Loki by `import_id`; Tempo by
-`catalog.import.id`; PromQL for each metric.
+Query cheat-sheet (fill in, #13): Loki by `import_id` (structured
+metadata, e.g. `{service_name="ciw-app"} | import_id="1"`) or `trace_id`;
+Tempo by trace id or `catalog.import.id`; PromQL for each series above.
+The local smoke check of CIW-09.1 is in
+`_docs/evidence/2026-10-26-telemetry-smoke/report.md`.
 
 ## Alerting *(issue 05, 09)*
 

@@ -428,7 +428,7 @@ this path leaves no workflow run behind.
 CI and the test suite use a fake LLM and never call the provider. One real
 run is made by hand, locally, and recorded following
 `.agents/skills/incident-response/SKILL.md` §8 under
-`_docs/evidence/<date>-real-llm-recovery/`: `report.md` (provider and model
+`_docs/evidence/2026-10-26-real-llm-recovery/`: `report.md` (provider and model
 as in `RUN_STARTED`, import and alert ids, times, failure code, decision,
 outcome), the import detail screenshot with two attempts and the agent
 timeline, and the `agent_actions` rows exported from `GET /api/imports/{id}`.

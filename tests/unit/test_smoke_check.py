@@ -105,9 +105,8 @@ def test_unreachable_host_fails_without_raising():
     assert sleeps == [7]
 
 
-def test_main_exit_codes(server, monkeypatch):
+def test_main_exit_codes(server):
     url, responses, _ = server
-    monkeypatch.setattr(smoke.time, "sleep", lambda _s: None)
     responses.append((200, health()))
     assert smoke.main([url, VERSION, "--attempts", "1"]) == 0
     assert smoke.main([url, "sha-" + "c" * 40, "--attempts", "2", "--interval", "0"]) == 1

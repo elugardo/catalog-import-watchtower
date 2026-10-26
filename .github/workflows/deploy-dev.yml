@@ -47,6 +47,7 @@ jobs:
   publish:
     name: Build once and push to GHCR
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       digest: ${{ steps.build.outputs.digest }}
@@ -95,6 +96,7 @@ jobs:
     name: Deploy to ciw-dev and smoke-check
     needs: publish
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment:
       name: development
       url: ${{ env.DEV_URL }}

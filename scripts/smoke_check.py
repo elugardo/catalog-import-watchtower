@@ -15,6 +15,7 @@ status code and the health body, which holds no secret.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import sys
 import time
@@ -26,18 +27,22 @@ from collections.abc import Callable
 def check_once(health_url: str, expected_version: str, timeout: float) -> tuple[bool, str]:
     """One request. Returns (passed, one-line description of what was seen)."""
     try:
-        with urllib.request.urlopen(health_url, timeout=timeout) as response:
-            status, raw = response.status, response.read()
-    except urllib.error.HTTPError as exc:
-        status, raw = exc.code, exc.read()
-    except (urllib.error.URLError, OSError) as exc:
+        try:
+            with urllib.request.urlopen(health_url, timeout=timeout) as response:
+                status, raw = response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            status, raw = exc.code, exc.read()
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+        # HTTPException: a proxy cutting the connection mid-deploy (bad status
+        # line, incomplete read) is one more failed attempt, not a crash.
         return False, f"no response ({exc.__class__.__name__}: {getattr(exc, 'reason', exc)})"
 
-    text = raw.decode("utf-8", errors="replace")[:500]
+    full_text = raw.decode("utf-8", errors="replace")
+    text = full_text[:500]  # what gets printed; the whole body is parsed
     if status != 200:
         return False, f"HTTP {status} {text}"
     try:
-        body = json.loads(text)
+        body = json.loads(full_text)
     except ValueError:
         return False, f"HTTP 200 but not JSON: {text}"
     if not isinstance(body, dict):

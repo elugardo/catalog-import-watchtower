@@ -11,7 +11,7 @@ frontend tests and names the scenarios.
 |---|---|---|---|
 | Backend unit | `tests/unit/` | pytest | no database, no network; `csv_validation`, price/quantity parsing, header checks, line numbering, duplicate detection, tool-result redaction |
 | Backend integration | `tests/integration/` | pytest against a real PostgreSQL | import API + persistence, atomic rollback, upsert, alert creation, retry idempotency and row lock, tool guards, startup sweep |
-| Worker | `tests/oncall/` | pytest with a fake LLM client | policy, tool-call loop, limits, stale-claim reset, misbehaving model |
+| Worker | `tests/oncall/` | pytest with a fake LLM client (`tests/oncall/fake_llm.py`: replaces only the `anthropic.Anthropic` client, returns real SDK `Message` objects) on the real Postgres | policy, tool-call loop, id binding to the claim, call and time limits, provider errors, stale-claim reset, two workers, misbehaving and malformed model calls, what reaches the provider, scenario 4 end to end |
 | Frontend | `web/src/**/__tests__/` | Vitest + Testing Library | upload form submit and result rendering; import detail rendering of errors / attempts / recovered label |
 
 Integration tests use the Compose `db` service (or a throwaway database on
@@ -59,8 +59,21 @@ The exit code is non-zero when any layer failed. A layer that ran zero tests
 counts as failed, and so does the integration layer when the database is
 unreachable (its tests error, they are never skipped).
 
-**It leaves your data alone.** The integration tests never truncate, delete
-or change rows they did not create: the rollback-only `db` session, the `ns`
+**It leaves your data alone.** The integration and worker tests run on
+their own database, `<configured database>_suite` (`ciw_suite` in Compose)
+on the same server, created on first use and kept; `DATABASE_URL` points at
+it for the whole session (`tests/integration/conftest.py` -> `database_url`).
+The configured database itself (`ciw`), which the app and `oncall-agent`
+use, is never written by the suite. That is how the suite and a live
+worker leave each other alone: started with `AGENT_ENABLED=true`, the
+worker polls `ciw` and never sees the `OPEN` alerts the failure tests
+create, so it cannot claim, retry or resolve them or write `agent_actions`
+for them, and the suite never sees the worker's rows. No application code
+knows about tests; the worker still claims the developer's own alerts in
+`ciw`. The worker tests that poll (`tests/oncall/test_poller.py`: the poll
+claims the oldest `OPEN` alert and resets every stale claim of its
+database) run on `isolated_db`. Inside the suite database the tests also
+never truncate, delete or change rows they did not create: the rollback-only `db` session, the `ns`
 per-test vendor token (with cleanup of every row that token leads to) and
 `throwaway_url` (a separate database, dropped afterwards) for anything
 destructive such as the migration round trip, or `isolated_db` (the same,
@@ -129,7 +142,7 @@ exits non-zero with the integration layer reported failed.
 | 1 happy path | integration: `valid.csv` → 201, `COMPLETED`, 3 products, 1 attempt; re-read confirms persistence |
 | 2 upsert | integration: `update.csv` after `valid.csv` → same product count, new price/quantity on `CHAIR-001` |
 | 3 atomic validation | integration: `invalid.csv` → `FAILED`, error names row and column, products unchanged (compare full snapshot, not just count) |
-| 4 recovery | integration with fake LLM: injected failure → alert → worker → `COMPLETED`, 2 attempts, alert `RESOLVED`, timeline rows, products written exactly once |
+| 4 recovery | worker with fake LLM (`tests/oncall/test_poller.py::test_scenario_4_end_to_end`): injected failure → alert `OPEN` → the worker polls and claims it → `COMPLETED`, 2 attempts, `recovered`, alert `RESOLVED`, `GET /api/imports/{id}` shows the attempts and the timeline (`RUN_STARTED`, `TOOL_CALL`s, `DECISION`, `RUN_FINISHED`), exactly 3 products |
 | 5 guardrails | unit + integration: validation error → no retry (`test_agent_retry.py::test_refusals_change_nothing[validation_error-…]`); two concurrent retry calls → one attempt (`test_agent_retry.py::test_two_concurrent_retries_make_one_attempt`, and four at once in `test_agent_third_attempt.py::test_concurrent_calls`); third attempt refused as a no-op that returns the current state, no exception, no new attempt row, over every route through the tools and the CLI (`test_agent_third_attempt.py`); `resolve_alert` on a failed import refused (`test_agent_alert_tools.py::test_resolve_alert_is_refused_on_a_failed_import`); redaction of every tool result (`tests/unit/test_agent_tool_results.py`, and the canary test `test_agent_redaction.py::test_no_canary_reaches_a_result_or_an_audit_row`); a live retry against the startup sweep (`test_agent_retry_races.py`, on `isolated_db`) |
 | 6 reproducibility | CI job `compose-up`: `docker compose up --build -d --wait` then `GET /api/health` is 200 with `db: ok`, logs on failure, always `down -v`; CI job `tests`: the one test command passes |
 

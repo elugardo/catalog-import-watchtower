@@ -13,10 +13,10 @@ with safe placeholders. The app runs with none of the optional ones set.
 |---|---|---|---|
 | `DATABASE_URL` | app, oncall-agent | yes | `postgresql+psycopg://…`; defaults to the Compose `db` seen from the host (`…@localhost:5432/ciw`) so `uv run` and the tests work with no `.env`; inside Compose the containers always get the `db` hostname |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | app, oncall-agent | no (default `2`) | psycopg connect timeout; `/api/health` gives up on the database probe after this value + 1 s (name resolution of a stopped `db` is not covered by the connect timeout, so the probe runs under its own deadline) |
-| `AGENT_ENABLED` | app, oncall-agent | no (default `false`) | worker claims alerts; app reports it on `/api/health` |
-| `LLM_PROVIDER`, `LLM_MODEL` | oncall-agent | when enabled | provider id and model name |
-| provider key (the chosen provider's variable) | oncall-agent | when enabled | never anywhere else |
-| `AGENT_POLL_SECONDS`, `AGENT_CLAIM_TIMEOUT_SECONDS`, `AGENT_MAX_TOOL_CALLS`, `AGENT_TIMEOUT_SECONDS` | oncall-agent | no | 10 / 300 / 8 / 120 |
+| `AGENT_ENABLED` | app, oncall-agent | no (default `false`) | worker claims alerts; app reports it on `/api/health` (from this variable only: with `true` and no key, health still says `true` and the worker's idle line is the signal) |
+| `LLM_PROVIDER`, `LLM_MODEL` | oncall-agent | when enabled | provider id (`anthropic`, the only one supported; the official `anthropic` Python SDK) and model name (the local `.env` uses `claude-haiku-5-5`) |
+| `ANTHROPIC_API_KEY` | oncall-agent | when enabled | the provider key; only in the git-ignored `.env`. `compose.yaml` passes it to `oncall-agent` only (`app`, `test` and CI get none); the worker never reads or logs the value, it only checks that it is set and the SDK reads it |
+| `AGENT_POLL_SECONDS`, `AGENT_CLAIM_TIMEOUT_SECONDS`, `AGENT_MAX_TOOL_CALLS`, `AGENT_TIMEOUT_SECONDS` | oncall-agent | no | 10 / 300 / 8 / 120: poll interval, stale-claim timeout, model tool calls per run (the one after is not executed), wall time per run (each provider call gets only what is left) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_SDK_DISABLED` | app, oncall-agent | no | telemetry; disabled in tests and (by default) when deployed |
 | `APP_PORT` | compose | no | host port for the app (default 8000) |
 | `DB_PORT` | compose | no | host port for the database (default 5432); the containers always use `db:5432` |
@@ -48,7 +48,7 @@ default); it recovers by itself when `db` is back.
 | app | http://localhost:8000 and http://localhost:8000/api/health | SPA and API, same origin; any non-`/api` path serves the SPA (history fallback); unknown `/api/...` is a 404 in the error shape |
 | db | `localhost:5432` (`DB_PORT`), user / password / database `ciw` / `ciw` / `ciw` | PostgreSQL 16; named volume `pgdata` |
 | Grafana | http://localhost:3000 (health: `/api/health`) | `grafana/otel-lgtm`; anonymous admin, no login form; dashboard and alert rule arrive with issue 09 |
-| oncall-agent | `docker compose logs -f oncall-agent` | no port; logs one line and stays idle unless `AGENT_ENABLED=true` (then it logs that the loop is not implemented yet, issue 08) |
+| oncall-agent | `docker compose logs -f oncall-agent` | no port; without credentials it logs one line, `oncall-agent: idle because <reason>` (`AGENT_ENABLED is not true`, `LLM_PROVIDER is not anthropic`, `ANTHROPIC_API_KEY is not set` or `LLM_MODEL is not set`; never a value), and claims nothing. With them it logs `polling every <n>s (provider anthropic, model <model>)`, then one line per claim and per finished run |
 
 Development without rebuilding the image: `docker compose up db` for the
 database, `uv run uvicorn app.main:app --reload` for the API on :8000 (`/`
@@ -211,23 +211,48 @@ Procedure to document and rehearse once:
    says which one is safe.
 4. Verify `/api/health` and one import on the rolled-back environment.
 
-## The real-LLM demonstration *(issue 08, 11)*
+## The real-LLM demonstration *(issue 11; traces and metrics: 13, 16)*
 
-CI uses a fake LLM. Exactly one (or more) real run is performed by hand and
-recorded, following `.agents/skills/incident-response/SKILL.md` §8, under
-`_docs/evidence/<date>-real-llm-recovery/`: provider and model, the import
-detail page with two attempts and the agent timeline, the `agent_actions`
-rows, the trace, the metric panels before and after. The README links to it.
-Without this, the On-Call Agent rubric row is not earned.
+CI and the test suite use a fake LLM and never call the provider. One real
+run is made by hand, locally, and recorded following
+`.agents/skills/incident-response/SKILL.md` §8 under
+`_docs/evidence/<date>-real-llm-recovery/`: `report.md` (provider and model
+as in `RUN_STARTED`, import and alert ids, times, failure code, decision,
+outcome), the import detail screenshot with two attempts and the agent
+timeline, and the `agent_actions` rows exported from `GET /api/imports/{id}`.
+The trace and the metric panels are added once the observability stack
+exists (#13, #16). The README links to it (#16). Without this, the On-Call
+Agent rubric row is not earned.
+
+How (PowerShell; `.env` holds `LLM_PROVIDER=anthropic`, `LLM_MODEL` and
+`ANTHROPIC_API_KEY`, and keeps `AGENT_ENABLED=false`):
+
+1. `$env:AGENT_ENABLED='true'; docker compose up -d --build --wait`: the
+   shell value overrides `.env` for this start only. `docker compose logs
+   oncall-agent` shows `polling every 10s (provider anthropic, model …)`.
+2. Upload `fixtures/valid.csv` with *Demo: fail first attempt with transient
+   storage timeout* ticked (`inject_transient_failure=true`).
+3. Within one poll the worker claims the alert, retries once and resolves
+   it; the import detail page shows two attempts, *Recovered* and the
+   timeline.
+4. Capture the folder, then grep it for the vendor name, the product names,
+   the SKUs and `sk-ant-` (all empty), and `git log -p --all` for `sk-ant-`.
+5. Back to the default: `Remove-Item Env:AGENT_ENABLED; docker compose up -d`.
+
+Never run `docker compose config`, `env`, `printenv` or `docker inspect` on
+`oncall-agent`: they print the key. To check that `app` has none without
+printing anything: `docker compose exec -T app sh -c 'test -z "$ANTHROPIC_API_KEY"'`
+(exit 0).
 
 ## Runbook
 
 | Symptom | Check | Fix |
 |---|---|---|
-| alert stays `OPEN` forever | `GET /api/health` → `agent_enabled`; if `true`, `docker compose logs oncall-agent` for the idle line (key missing) | set `AGENT_ENABLED=true` and the key in `.env`; restart `oncall-agent` |
-| alert stuck `IN_PROGRESS` | worker logs by `alert_id` | the stale-claim timeout (5 min) returns it to `OPEN`; otherwise `docker compose exec -T app python -m app.oncall tools mark_needs_attention <alert_id> "<reason>"` (exit 0 `DONE`; exit 1 `REFUSED` once the alert is back to `OPEN`, since the CLI cannot claim) |
-| retry refused (no-op) | `GET /api/imports/{id}` attempts and failure code, or `docker compose exec -T app python -m app.oncall tools get_import_attempts <import_id>` | by design for validation errors and after two attempts (`refused_reason` in the JSON on stdout); operator uploads a corrected file |
-| triage by hand | `docker compose exec -T app python -m app.oncall tools <tool> [args]`, one of the six tools (`_docs/architecture.md` -> *On-call worker loop*, step 4); stdout is one JSON object | exit **0** `DONE`, **1** `REFUSED` (guard failed, nothing changed), **2** usage error (nothing touched), **3** `NOT_FOUND`, **4** unexpected error (stderr names the exception type only; check that `db` is up). Every call on an alerted import writes a `TOOL_CALL` row to its timeline |
+| alert stays `OPEN` forever | `GET /api/health` → `agent_enabled`; if `true`, `docker compose logs oncall-agent` for the idle line, which names what is missing (`LLM_PROVIDER`, `ANTHROPIC_API_KEY`, `LLM_MODEL`) | set `AGENT_ENABLED=true`, `LLM_PROVIDER=anthropic`, `LLM_MODEL` and the key in `.env`; `docker compose up -d oncall-agent` |
+| alert `NEEDS_ATTENTION` with `agent run exceeded limits`, `agent ended without a decision` or `agent run failed (<ExceptionType>)` | the import detail timeline: `RUN_FINISHED` (outcome, tool-call count, duration), `ERROR` (exception type only, e.g. `AuthenticationError`, `RateLimitError`, `APIConnectionError`) | by design: a human triages it with the tools below; an authentication error means the key is wrong or revoked |
+| alert stuck `IN_PROGRESS` | worker logs by `alert_id` | the stale-claim timeout (5 min) returns it to `OPEN`; otherwise `docker compose exec -T oncall-agent python -m app.oncall tools mark_needs_attention <alert_id> "<reason>"` (exit 0 `DONE`; exit 1 `REFUSED` once the alert is back to `OPEN`, since the CLI cannot claim) |
+| retry refused (no-op) | `GET /api/imports/{id}` attempts and failure code, or `docker compose exec -T oncall-agent python -m app.oncall tools get_import_attempts <import_id>` | by design for validation errors and after two attempts (`refused_reason` in the JSON on stdout); operator uploads a corrected file |
+| triage by hand | `docker compose exec -T oncall-agent python -m app.oncall tools <tool> [args]`, one of the six tools; run it in `oncall-agent`, never `app`: a `retry_failed_import` run inside `app` is killed when `app` restarts (the sweep then fails the import and the retry budget is spent), while `oncall-agent` is always up, enabled or not (`_docs/architecture.md` -> *On-call worker loop*, step 4); stdout is one JSON object | exit **0** `DONE`, **1** `REFUSED` (guard failed, nothing changed), **2** usage error (nothing touched), **3** `NOT_FOUND`, **4** unexpected error (stderr names the exception type only; check that `db` is up). Every call on an alerted import writes a `TOOL_CALL` row to its timeline |
 | import stuck `PROCESSING` | `docker compose logs app`: a 500 on `POST /api/imports` leaves `unhandled <ExceptionClass> in POST /api/imports`, and when the failure write was what failed, the line before it is `import <id> attempt <n> failed: <code> (<ExceptionClass>)`, which names the import (type-only lines, no traceback) | the startup sweep marks it `FAILED` / `INTERNAL_ERROR` on the next start and raises its alert (`INTERNAL_ERROR (found PROCESSING at startup)`; an existing alert keeps its status); `docker compose restart app` |
 | no traces in Grafana | otel-lgtm logs; `OTEL_EXPORTER_OTLP_ENDPOINT` | fix endpoint; `docker compose restart app oncall-agent` |
 | deploy green but site down | provider health check, migrations job log | roll back to previous tag (above) |

@@ -240,8 +240,9 @@ The tables and enums are spec §6. On top of it:
 4. `python -m app.oncall tools <tool> [args]` (`app/oncall/cli.py`) runs one
    tool function by hand with the same guards and audit rows; it is how a
    human triages following `.agents/skills/incident-response/SKILL.md`. In
-   the running stack: `docker compose exec -T app python -m app.oncall tools
-   <tool> [args]`. The arguments are `get_import_incident <alert_id>`,
+   the running stack: `docker compose exec -T oncall-agent python -m app.oncall
+   tools <tool> [args]` (in `oncall-agent`, which is always up, so a retry
+   is not killed by an `app` restart). The arguments are `get_import_incident <alert_id>`,
    `get_import_attempts <import_id>`, `get_import_diagnostics <import_id>`,
    `retry_failed_import <import_id>`, `mark_needs_attention <alert_id>
    "<reason>"` and `resolve_alert <alert_id>`. It prints the result as one

@@ -1,0 +1,2 @@
+# FAKE value planted to prove the gitleaks step goes red (CIW-10.1). Not a real credential.
+service_api_key = "Zq7vT2mXk9LpR4wN8sBd3HfY6cJ1gUeA"

@@ -206,7 +206,7 @@ Four jobs, none of which reads a secret (fork PRs get none from GitHub):
 
 | Job (status check name to require on `main`) | What it does |
 |---|---|
-| `Secret scan (gitleaks)` | gitleaks 8.21.2 over the whole history (`fetch-depth: 0`), findings redacted. No `.gitleaks.toml`: the default rules pass on `main` with no allowlist. |
+| `Secret scan (gitleaks)` | gitleaks 8.21.2 over every commit reachable from the PR head (`fetch-depth: 0`, `--log-opts=HEAD`), findings redacted. No `.gitleaks.toml`: the default rules pass on `main` with no allowlist. |
 | `Tests (the one test command)` | warms the test image from the GitHub Actions layer cache (scope `test`), then runs the one test command unchanged on the same builder |
 | `Image build (runtime image, built once per run)` | builds the runtime image once (cache scope `runtime`) with `APP_VERSION=sha-<commit>`, asserts the version and that a planted `.env` is not in `/app`, and hands the image to the next job as an artifact |
 | `Scenario 6 (docker compose up --wait, then /api/health)` | loads that image and runs `docker compose up --no-build -d --wait` with the real `compose.yaml`; `/api/health` must be 200, `db: ok`, `version` = `sha-<commit>` |
@@ -339,6 +339,10 @@ the PR (or evidence report) with the command used, values redacted.
 - [ ] **Deploy token**, scoped to `ciw-dev` only, piped straight into the
   environment secret:
   `flyctl tokens create deploy -a ciw-dev --name ciw-dev-github-actions --expiry <e.g. 2160h> | gh secret set FLY_API_TOKEN --env development --repo elugardo/catalog-import-watchtower`
+  Run it from Git Bash, not Windows PowerShell 5.1: PowerShell's pipe to a
+  native command can prepend a byte-order mark, and flyctl then fails with
+  `token validation error` (seen on the first dev and prod tokens; both were
+  revoked and replaced, see `_docs/evidence/2026-10-26-deploy-dev/report.md`).
 - [ ] **First publish**: run `deploy-dev.yml` (push to `main`, or
   `gh workflow run deploy-dev.yml --ref <branch>` once the file is on
   `main`; GitHub dispatches only workflows that exist on the default

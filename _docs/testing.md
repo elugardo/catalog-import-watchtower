@@ -75,7 +75,11 @@ the app's lifespan does, that is whenever a `TestClient` is entered as a
 context manager (`with TestClient(create_app()):`). So every test that enters
 one against a real database uses `isolated_db`: the sweep tests in
 `test_import_sweep.py` and `test_alert_sweep.py`, and
-`test_failure_injection.py::test_when_the_failure_write_fails_too_the_sweep_finishes_it`.
+`test_failure_injection.py::test_when_the_failure_write_fails_too_the_sweep_finishes_it`,
+and the agent tool tests that run the sweep or reset every stale claim
+(`test_agent_retry_races.py`,
+`test_agent_third_attempt.py::test_after_the_sweep_failed_attempt_2`,
+`test_alert_claims.py::test_reset_stale_claims_returns_only_old_claims_to_open`).
 The `client` fixture and `make_client` return a `TestClient` that is not
 entered, so they never sweep; the one other test that enters one
 (`tests/unit/test_import_errors.py`, startup with the database down) points
@@ -122,7 +126,7 @@ exits non-zero with the integration layer reported failed.
 | 2 upsert | integration: `update.csv` after `valid.csv` → same product count, new price/quantity on `CHAIR-001` |
 | 3 atomic validation | integration: `invalid.csv` → `FAILED`, error names row and column, products unchanged (compare full snapshot, not just count) |
 | 4 recovery | integration with fake LLM: injected failure → alert → worker → `COMPLETED`, 2 attempts, alert `RESOLVED`, timeline rows, products written exactly once |
-| 5 guardrails | unit + integration: validation error → no retry; two concurrent retry calls → one attempt; third attempt refused as a no-op that returns the current state (no exception, no new attempt row); `resolve_alert` on a failed import refused |
+| 5 guardrails | unit + integration: validation error → no retry (`test_agent_retry.py::test_refusals_change_nothing[validation_error-…]`); two concurrent retry calls → one attempt (`test_agent_retry.py::test_two_concurrent_retries_make_one_attempt`, and four at once in `test_agent_third_attempt.py::test_concurrent_calls`); third attempt refused as a no-op that returns the current state, no exception, no new attempt row, over every route through the tools and the CLI (`test_agent_third_attempt.py`); `resolve_alert` on a failed import refused (`test_agent_alert_tools.py::test_resolve_alert_is_refused_on_a_failed_import`); redaction of every tool result (`tests/unit/test_agent_tool_results.py`, and the canary test `test_agent_redaction.py::test_no_canary_reaches_a_result_or_an_audit_row`); a live retry against the startup sweep (`test_agent_retry_races.py`, on `isolated_db`) |
 | 6 reproducibility | CI job `compose-up`: `docker compose up --build -d --wait` then `GET /api/health` is 200 with `db: ok`, logs on failure, always `down -v`; CI job `tests`: the one test command passes |
 
 Also always cover: the empty file, header-only file, missing, duplicate and

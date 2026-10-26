@@ -4,6 +4,9 @@ CIW-01 stub. It logs once why it is idle, then waits for SIGTERM/SIGINT so
 Compose can stop it within the default grace period. It makes no LLM call,
 touches no table and claims nothing. CIW-08.2 replaces the wait with the
 poll / claim / LLM loop described in `_docs/architecture.md`.
+
+`python -m app.oncall tools <tool> [args]` is the maintenance CLI instead
+(`app/oncall/cli.py`): one tool call, then exit.
 """
 
 import logging
@@ -17,6 +20,11 @@ log = logging.getLogger("app.oncall")
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv and argv[0] == "tools":
+        from app.oncall.cli import run
+
+        return run(argv[1:])
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

@@ -1,7 +1,8 @@
 """The durable user-impact alert (`_docs/operations.md` -> *Alerting*, layer 1).
 
-Only create-or-update lives here: the worker's claim, the stale-claim reset and
-every status change after `OPEN` are CIW-08.1 (#10).
+Create-or-update, and the worker's claim helpers. The two status changes a
+tool makes (`mark_needs_attention`, `resolve_alert`) live with their guards
+and audit rows in `app/services/agent_tools.py`.
 
 - `record_failure_alert` is called inside the transaction that sets an import
   `FAILED` (the importer and the startup sweep), so a `FAILED` import never
@@ -14,17 +15,33 @@ every status change after `OPEN` are CIW-08.1 (#10).
   or the raised exception's type (the fixed word `OperationalError` in
   `operational_reason` names the class matched, not `type(exc)`), since it
   reaches the UI, the API and the LLM prompt.
+- `claim_alert` and `reset_stale_claims` are the worker's compare-and-set
+  claim and its stale-claim reset (`_docs/team/oncall-agent.md` -> *Trigger
+  and claim*). They write no `agent_actions` row and are not tools; polling,
+  picking the oldest `OPEN` alert and the timeout setting belong to the
+  worker loop (#11).
 """
 
 from collections.abc import Iterable
+from datetime import timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import Alert
 
 MAX_REASON_LENGTH = 200
+
+# Ids are BIGSERIAL: anything outside 1 .. 2**63 - 1 names no row, and is
+# never sent to the database (it would raise instead of matching nothing).
+MAX_ID = 2**63 - 1
+
+
+def is_row_id(value: object) -> bool:
+    """True for an int that could be a `BIGSERIAL` id (bools are not ids)."""
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_ID
+
 
 SWEEP_REASON = "INTERNAL_ERROR (found PROCESSING at startup)"
 
@@ -85,3 +102,41 @@ def record_failure_alerts(
         set_={"reason": statement.excluded.reason, "updated_at": func.clock_timestamp()},
     ).returning(Alert.id, Alert.import_id)
     return [(row.id, row.import_id) for row in session.execute(statement)]
+
+
+def claim_alert(session: Session, alert_id: int) -> bool:
+    """Compare-and-set `OPEN -> IN_PROGRESS`, setting `claimed_at`; True when this call claimed it.
+
+    One `UPDATE … WHERE id = ? AND status = 'OPEN'`: a concurrent claim waits
+    on the row, re-checks the status and updates nothing. Runs in the caller's
+    transaction.
+    """
+    if not is_row_id(alert_id):
+        return False
+    claimed = session.execute(
+        update(Alert)
+        .where(Alert.id == alert_id, Alert.status == "OPEN")
+        .values(
+            status="IN_PROGRESS",
+            claimed_at=func.clock_timestamp(),
+            updated_at=func.clock_timestamp(),
+        )
+        .returning(Alert.id)
+    ).first()
+    return claimed is not None
+
+
+def reset_stale_claims(session: Session, timeout_seconds: float) -> list[int]:
+    """Return every `IN_PROGRESS` alert claimed more than `timeout_seconds` ago to `OPEN`.
+
+    `claimed_at` is cleared; the ids reset are returned, sorted. Runs in the
+    caller's transaction.
+    """
+    cutoff = func.clock_timestamp() - timedelta(seconds=timeout_seconds)
+    reset = session.execute(
+        update(Alert)
+        .where(Alert.status == "IN_PROGRESS", Alert.claimed_at < cutoff)
+        .values(status="OPEN", claimed_at=None, updated_at=func.clock_timestamp())
+        .returning(Alert.id)
+    ).scalars()
+    return sorted(reset)

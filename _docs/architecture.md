@@ -63,6 +63,7 @@ app/
   telemetry.py         OTel setup, metrics, span helpers
   oncall/
     __main__.py        `python -m app.oncall` (worker) and `… tools <tool> …` (maintenance CLI)
+    cli.py             the maintenance CLI: argument parsing, JSON on stdout, exit codes
     poller.py          poll, claim, dispatch
     llm.py             provider client, tool schemas, the conversation loop
     prompt.py          system prompt, derived from _docs/team/oncall-agent.md
@@ -172,9 +173,18 @@ The tables and enums are spec §6. On top of it:
 4. `agent_tools.retry_failed_import(import_id)` takes `SELECT … FOR UPDATE`
    on the import row, re-reads status, failure code and attempt count,
    refuses (returns the current state, no exception) unless status is
-   `FAILED`, the code is `TRANSIENT_STORAGE_TIMEOUT` and the count is 1, then
-   runs step 2 with *n* = 2. Two concurrent calls: one proceeds, the other
-   waits on the lock, re-reads, and no-ops.
+   `FAILED`, the code is `TRANSIENT_STORAGE_TIMEOUT` and the count is 1.
+   When the guard passes, the same locked transaction sets the import back
+   to `PROCESSING` and inserts attempt 2 as `RUNNING`
+   (`importer.begin_attempt`), and commits before processing starts;
+   `failure_code` keeps its value until attempt 2 ends (cleared on success,
+   replaced on failure). Then `importer.process_attempt` runs step 2 with
+   *n* = 2 on the stored `csv_bytes`, the same code as attempt 1. Two
+   concurrent calls: one proceeds, the other waits on the lock, re-reads
+   `PROCESSING`, and is refused. The retry never touches the alert on
+   success (resolving is `resolve_alert`'s job); a failed attempt 2 updates
+   it under the rule of step 2.iii. No tool takes an attempt number, and
+   the unique `(import_id, attempt_number)` backs the guard.
 5. On startup (the FastAPI lifespan in `app/main.py`; never in
    `python -m app.oncall`), `importer.sweep_stuck_imports` sets any import
    still `PROCESSING` to `FAILED` / `INTERNAL_ERROR` with `product_count` and
@@ -186,7 +196,27 @@ The tables and enums are spec §6. On top of it:
    (a crashed attempt 2) keeps it under the update rule of step 2.iii. Only
    `PROCESSING` imports are selected, so a second start changes nothing and
    a `FAILED` import left without an alert by an earlier build is never
-   backfilled. If the
+   backfilled. A crashed retry is one such import: attempt 2 `RUNNING`
+   under a `PROCESSING` import (step 4), swept like attempt 1.
+
+   **A live retry.** The sweep runs in `app`, attempt 2 in `oncall-agent` or
+   the CLI, so an `app` restart can sweep an import whose attempt 2 is still
+   working. Whichever writer locks the import row first wins, and the other
+   changes nothing. The sweep fails the `PROCESSING` imports first, then the
+   `RUNNING` attempts of exactly those imports, in a later statement that
+   sees an attempt 2 committed together with its `PROCESSING` import.
+   Attempt 2's upsert transaction starts by locking the import row, then its
+   attempt row (the same order, so the two never deadlock), and every
+   end-state write of an attempt takes the same locks and is
+   compare-and-set on the import being `PROCESSING` and the attempt
+   `RUNNING`. If the sweep gets there first, attempt 2 finds its import
+   ended and writes nothing: the import ends `FAILED` / `INTERNAL_ERROR`,
+   attempt 2 `FAILED` / `INTERNAL_ERROR`, products as before the retry. If
+   attempt 2 is already inside its upsert transaction, the sweep waits for
+   its commit, then finds the import no longer `PROCESSING` and sweeps
+   nothing: the import ends `COMPLETED`.
+   Either way there is one alert row and no attempt left `RUNNING`, and the
+   tool reports the state that resulted. If the
    database is unreachable at startup, the sweep is skipped with a warning
    naming only the exception type and the app starts anyway (`/api/health`
    reports `degraded`). This covers the app process. The image's entrypoint
@@ -207,9 +237,21 @@ The tables and enums are spec §6. On top of it:
 3. Each tool function enforces its guard, redacts its output, writes
    `TOOL_CALL`; the loop writes `DECISION` from the model's stated reason and
    `RUN_FINISHED` (or `ERROR`) with the outcome.
-4. `python -m app.oncall tools <tool> [args]` runs one tool function by
-   hand with the same guards and audit rows; it is how a human triages
-   following `.agents/skills/incident-response/SKILL.md`.
+4. `python -m app.oncall tools <tool> [args]` (`app/oncall/cli.py`) runs one
+   tool function by hand with the same guards and audit rows; it is how a
+   human triages following `.agents/skills/incident-response/SKILL.md`. In
+   the running stack: `docker compose exec -T app python -m app.oncall tools
+   <tool> [args]`. The arguments are `get_import_incident <alert_id>`,
+   `get_import_attempts <import_id>`, `get_import_diagnostics <import_id>`,
+   `retry_failed_import <import_id>`, `mark_needs_attention <alert_id>
+   "<reason>"` and `resolve_alert <alert_id>`. It prints the result as one
+   JSON object on stdout (logs go to stderr) and exits **0** `DONE`, **1**
+   `REFUSED`, **2** usage error (no tool, unknown tool, missing or extra
+   argument, non-integer id; the database is not touched), **3**
+   `NOT_FOUND`, **4** unexpected error (one stderr line naming only the
+   exception type). It works with the agent disabled and no LLM key, never
+   runs the startup sweep, and has no claim: on an `OPEN` alert a human can
+   read, retry and resolve, while `mark_needs_attention` stays refused.
 
 ## Auth between components
 

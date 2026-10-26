@@ -36,6 +36,7 @@ from typing import Any, Protocol
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app import telemetry
 from app.db import get_sessionmaker
 from app.models import AgentAction, Alert, Import, ImportAttempt
 from app.services import alerts, importer
@@ -430,30 +431,42 @@ def retry_failed_import(import_id: int) -> dict[str, Any]:
     """
     if not alerts.is_row_id(import_id):
         return not_found("import_id", import_id)
-    with _session() as session, session.begin():
-        locked = _lock_import(session, import_id)
-        if locked is None:
-            return not_found("import_id", import_id)
-        attempt_count = session.execute(
-            select(func.count())
-            .select_from(ImportAttempt)
-            .where(ImportAttempt.import_id == import_id)
-        ).scalar_one()
-        reason = _retry_refusal(locked.status, locked.failure_code, attempt_count)
-        if reason is not None:
-            result = refused(reason, _incident(session, import_id))
-            if result["alert_id"] is not None:
-                _audit(
-                    session,
-                    "retry_failed_import",
-                    result,
-                    alert_id=result["alert_id"],
-                    import_id=import_id,
-                )
-            return result
-        attempt_id = importer.begin_attempt(session, import_id, RETRY_ATTEMPT_NUMBER)
+    # Attempt 2's span starts once the guard passed, as a child of the current
+    # span (the worker's `retry_failed_import` tool span; none from the CLI, so
+    # there it is the root of its own trace). `begin_attempt` stores its trace id.
+    attempt_span = None
+    try:
+        with _session() as session, session.begin():
+            locked = _lock_import(session, import_id)
+            if locked is None:
+                return not_found("import_id", import_id)
+            attempt_count = session.execute(
+                select(func.count())
+                .select_from(ImportAttempt)
+                .where(ImportAttempt.import_id == import_id)
+            ).scalar_one()
+            reason = _retry_refusal(locked.status, locked.failure_code, attempt_count)
+            if reason is not None:
+                result = refused(reason, _incident(session, import_id))
+                if result["alert_id"] is not None:
+                    _audit(
+                        session,
+                        "retry_failed_import",
+                        result,
+                        alert_id=result["alert_id"],
+                        import_id=import_id,
+                    )
+                return result
+            attempt_span = importer.attempt_span(import_id, RETRY_ATTEMPT_NUMBER)
+            with telemetry.use_span(attempt_span, end_on_exit=False):
+                attempt_id = importer.begin_attempt(session, import_id, RETRY_ATTEMPT_NUMBER)
+    except BaseException:
+        if attempt_span is not None:
+            attempt_span.end()
+        raise
 
-    importer.process_attempt(import_id, attempt_id, RETRY_ATTEMPT_NUMBER)
+    with telemetry.use_span(attempt_span):
+        importer.process_attempt(import_id, attempt_id, RETRY_ATTEMPT_NUMBER)
 
     with _session() as session, session.begin():
         result = done(_incident(session, import_id))

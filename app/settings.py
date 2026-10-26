@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     # Where the built SPA lives (produced by the Dockerfile; git-ignored).
     static_dir: Path = PACKAGE_DIR / "static"
 
+    # Telemetry (`app/telemetry.py`). Off unless explicitly `false`: tests, `uv run`
+    # and the deployed environments export nothing; `compose.yaml` sets `false`.
+    otel_sdk_disabled: bool = True
+    otel_exporter_otlp_endpoint: str = "http://localhost:4318"
+    # Empty: the process's own name (`ciw-app`, `ciw-oncall-agent`).
+    otel_service_name: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

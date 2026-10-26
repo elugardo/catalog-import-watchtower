@@ -28,11 +28,19 @@ def main(argv: list[str] | None = None) -> int:
 
         return run(argv[1:])
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        stream=sys.stdout,
-    )
+    from app import telemetry
+
+    # JSON log lines on stderr; OTLP export when OTEL_SDK_DISABLED=false.
+    telemetry.setup_logging()
+    configured = telemetry.configure("ciw-oncall-agent")
+    try:
+        return _serve()
+    finally:
+        if configured:
+            telemetry.shutdown()
+
+
+def _serve() -> int:
     from app.oncall import llm, poller
 
     try:

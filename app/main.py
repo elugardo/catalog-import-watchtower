@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app import telemetry
 from app.routers import alerts, health, imports, products, vendors
 from app.schemas.query import QUERY_RULES
 from app.schemas.upload import UploadRejected
@@ -93,6 +94,9 @@ class UnhandledErrorMiddleware:
         try:
             await self.app(scope, receive, tracking_send)
         except Exception as exc:  # noqa: BLE001 - the last stop before the server
+            # The server span sits outside this layer and never sees the
+            # exception: its class goes on the span here, never its message.
+            telemetry.mark_error(telemetry.current_span(), exc)
             log.error(
                 "unhandled %s in %s",
                 type(exc).__name__,
@@ -129,6 +133,7 @@ def _describe_request(scope: Scope, templates: dict[int, str]) -> str:
 
 
 def create_app() -> FastAPI:
+    telemetry.configure("ciw-app")  # JSON logs always; the SDK when OTEL_SDK_DISABLED=false
     app = FastAPI(
         title="Catalog Import Watchtower",
         version=get_settings().app_version,
@@ -209,6 +214,9 @@ def create_app() -> FastAPI:
         return error_response(400, "INVALID_FIELD", "request validation failed", details)
 
     app.add_middleware(UnhandledErrorMiddleware, templates=templates)
+    # Last, and not through `add_middleware`: it wraps the whole stack from the
+    # outside, so `UnhandledErrorMiddleware` stays the outermost user middleware.
+    telemetry.instrument_app(app)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> Response:

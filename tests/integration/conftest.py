@@ -20,6 +20,7 @@ import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -119,7 +120,7 @@ def telemetry_off() -> Iterator[None]:
 
 
 @pytest.fixture
-def otel() -> Iterator["Captured"]:
+def otel() -> Iterator[Any]:
     """In-memory span, log and metric exporters for one test; telemetry off again afterwards.
 
     Request it before any fixture that builds the app (`otel_client`), so the

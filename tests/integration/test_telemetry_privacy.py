@@ -188,11 +188,11 @@ def test_no_catalog_content_in_any_signal(
     otel,
     otel_client,
     otel_live_server,
-    db_faults,
+    db_faults,  # noqa: F811 - the fixture imported above
     migrated_engine,
     ns,
     capfd,
-    monkeypatch,  # noqa: F811
+    monkeypatch,
 ):
     monkeypatch.setenv("ANTHROPIC_API_KEY", CANARY_KEY)
     stream = io.StringIO()

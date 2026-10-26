@@ -17,7 +17,8 @@ x-shared-env: &shared-env
   DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-2}
   AGENT_ENABLED: ${AGENT_ENABLED:-false}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-lgtm:4318}
-  OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
+  # On for the local stack (CIW-09.1); the test overlay and Fly keep `true`.
+  OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
 
 services:
   app:
@@ -31,6 +32,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Started, not healthy: its cold start can take minutes, and export is
+      # batched in the background, so the app never waits for the collector.
+      otel-lgtm:
+        condition: service_started
     healthcheck:
       # Healthy only once the API answers *and* reports the database reachable,
       # so `docker compose up --wait` returns when /api/health says db: ok.
@@ -64,6 +69,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      otel-lgtm:
+        condition: service_started
 
   db:
     image: postgres:16
